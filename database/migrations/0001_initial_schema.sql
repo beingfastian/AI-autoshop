@@ -1,3 +1,7 @@
+-- Initial schema, moved unchanged from database/schema.sql (seed data now lives in database/seed.sql).
+
+-- Up Migration
+
 -- ============================================
 -- AI RECEPTIONIST MVP - DATABASE SCHEMA
 -- ============================================
@@ -255,23 +259,6 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_bookings_updated_at BEFORE UPDATE ON bookings
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ============================================
--- SEED DATA (for testing)
--- ============================================
-
--- Insert test workshop
-INSERT INTO workshops (name, email, phone, address) VALUES
-('Joe''s Auto Repair', 'joe@joeauto.com', '+1-555-0100', '123 Main St, Anytown, USA');
-
--- Insert test user
-INSERT INTO users (workshop_id, email, password_hash, full_name, role) 
-SELECT 
-    id,
-    'admin@joeauto.com',
-    '$2b$10$YourHashedPasswordHere', -- You'll generate this properly
-    'Joe Admin',
-    'owner'
-FROM workshops WHERE email = 'joe@joeauto.com';
 
 -- ============================================
 -- ANALYTICS VIEWS
@@ -304,3 +291,17 @@ FROM workshops w
 LEFT JOIN calls c ON c.workshop_id = w.id
 LEFT JOIN bookings b ON b.call_id = c.id
 GROUP BY w.id, w.name;
+
+-- Down Migration
+
+DROP VIEW IF EXISTS conversion_stats;
+DROP VIEW IF EXISTS booking_stats_daily;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS call_analysis;
+DROP TABLE IF EXISTS bookings;
+DROP TABLE IF EXISTS vehicles;
+DROP TABLE IF EXISTS customers;
+DROP TABLE IF EXISTS calls;
+DROP TABLE IF EXISTS workshops;
+DROP FUNCTION IF EXISTS update_updated_at_column();
+DROP FUNCTION IF EXISTS update_customer_bookings();
