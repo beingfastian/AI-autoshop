@@ -5,9 +5,19 @@ on:
     branches: [main, Architectures]
   pull_request:
 
+# Least privilege: CI only needs to read the repo
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both ways of configuring the database must keep working
+        db-config: [db-vars, database-url]
 
     services:
       postgres:
@@ -25,10 +35,6 @@ jobs:
           --health-retries 10
 
     env:
-      DB_HOST: localhost
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
       TEST_DB_NAME: ai_receptionist_test
 
     steps:
@@ -42,6 +48,18 @@ jobs:
             package-lock.json
             voice-service/package-lock.json
             booking-service/package-lock.json
+
+      - name: Configure database via DB_* variables
+        if: matrix.db-config == 'db-vars'
+        run: |
+          echo "DB_HOST=localhost" >> "$GITHUB_ENV"
+          echo "DB_PORT=5432" >> "$GITHUB_ENV"
+          echo "DB_USER=postgres" >> "$GITHUB_ENV"
+          echo "DB_PASSWORD=postgres" >> "$GITHUB_ENV"
+
+      - name: Configure database via DATABASE_URL only
+        if: matrix.db-config == 'database-url'
+        run: echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/ai_receptionist" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |

@@ -16,7 +16,7 @@ Architecture/       Architecture diagram (draw.io + SVG)
 
 ## Prerequisites
 
-- Node.js 20.11+ (the services themselves run on 18+, the migration tooling needs 20.11+)
+- Node.js 20.19+ or 22.12+ (the services themselves run on 18+; the migration tooling loads an ES-module-only package via `require()`, which needs those versions)
 - PostgreSQL 14+, either a local install or `docker compose up -d` (Postgres on port **5433**)
 
 ## Setup
