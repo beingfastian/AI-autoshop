@@ -1,4 +1,4 @@
-// Database configuration and connection pool
+// Database configuration and connection pool for Booking Service
 const { Pool } = require('pg');
 require('dotenv').config();
 
