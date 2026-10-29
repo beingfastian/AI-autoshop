@@ -58,41 +58,44 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ============================================
-// CRON JOBS
-// ============================================
+// Only start the server and cron when run directly (not when imported by tests)
+if (require.main === module) {
+  // ============================================
+  // CRON JOBS
+  // ============================================
 
-// Send reminder emails every hour
-cron.schedule('0 * * * *', async () => {
-  console.log('🔔 Running reminder job...');
-  try {
-    await sendReminders();
-  } catch (error) {
-    console.error('Reminder job failed:', error);
-  }
-});
+  // Send reminder emails every hour
+  cron.schedule('0 * * * *', async () => {
+    console.log('🔔 Running reminder job...');
+    try {
+      await sendReminders();
+    } catch (error) {
+      console.error('Reminder job failed:', error);
+    }
+  });
 
-// ============================================
-// START SERVER
-// ============================================
+  // ============================================
+  // START SERVER
+  // ============================================
 
-const server = app.listen(PORT, () => {
-  console.log(`
+  const server = app.listen(PORT, () => {
+    console.log(`
 ╔════════════════════════════════════════╗
 ║   📅 Booking Service Started          ║
 ║   Port: ${PORT}                        ║
 ║   Environment: ${process.env.NODE_ENV || 'development'}         ║
 ╚════════════════════════════════════════╝
-  `);
-});
+    `);
+  });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  server.close(() => {
-    pool.end(() => {
-      process.exit(0);
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    server.close(() => {
+      pool.end(() => {
+        process.exit(0);
+      });
     });
   });
-});
+}
 
 module.exports = app;

@@ -62,13 +62,16 @@ app.use((err, req, res, next) => {
   });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`🎙️ Voice Service running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
-});
+// Only start listening when run directly (not when imported by tests)
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    console.log(`🎙️ Voice Service running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+  });
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing...');
-  server.close(() => pool.end(() => process.exit(0)));
-});
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, closing...');
+    server.close(() => pool.end(() => process.exit(0)));
+  });
+}
 
 module.exports = app;

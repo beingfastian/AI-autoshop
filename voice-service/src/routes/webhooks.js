@@ -110,7 +110,7 @@ router.post('/vapi/call-ended', verifyVapiBearer, async (req, res) => {
   } catch (e) {
     console.error('❌ call-ended webhook error:', e);
     // Already responded 200 above in success path; but if error happened before response:
-    try { res.status(200).json({ received: true, error: e.message }); } catch (_) {}
+    try { res.status(200).json({ received: true, error: e.message }); } catch (_) { /* response already sent */ }
   }
 });
 
