@@ -61,7 +61,7 @@ router.post('/vapi/call-started', verifyVapiBearer, async (req, res) => {
     return res.status(200).json({ received: true });
   } catch (e) {
     console.error('call-started webhook error:', e);
-    return res.status(200).json({ received: true, error: e.message });
+    return res.status(200).json({ received: true });
   }
 });
 
@@ -110,7 +110,7 @@ router.post('/vapi/call-ended', verifyVapiBearer, async (req, res) => {
   } catch (e) {
     console.error('❌ call-ended webhook error:', e);
     // Already responded 200 above in success path; but if error happened before response:
-    try { res.status(200).json({ received: true, error: e.message }); } catch (_) { /* response already sent */ }
+    try { res.status(200).json({ received: true }); } catch (_) { /* response already sent */ }
   }
 });
 
@@ -258,7 +258,7 @@ async function createBookingFromStructuredData({ callId, workshopId, structuredD
       customerId,
       customerEmail: structuredData.customer_email || null,
       scheduledAt: booking.rows[0].scheduled_at
-    });
+    }, { headers: { 'x-api-key': process.env.API_KEY } });
   } catch (e) {
     console.warn('⚠️ Booking notify failed:', e.message);
   }
