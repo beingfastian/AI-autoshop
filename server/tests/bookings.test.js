@@ -8,7 +8,8 @@ const request = require('supertest');
 const sgMail = require('@sendgrid/mail');
 const app = require('../src/app');
 const api = request.agent(app).set('x-api-key', process.env.API_KEY); // /api routes need the key
-const { pool, resetDb, createWorkshop, waitFor } = require('./helpers');
+const { pool, resetDb, createWorkshop } = require('./helpers');
+const { sendDueNotifications } = require('../src/services/notifications');
 
 const UNKNOWN_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -29,14 +30,9 @@ const validBooking = () => ({
 
 const createBooking = (body = validBooking()) => api.post('/api/bookings').send(body);
 
-const emailFlags = async (id) =>
-  (await pool.query('SELECT customer_email_sent, workshop_email_sent FROM bookings WHERE id = $1', [id])).rows[0];
-
-const waitForEmails = (id) =>
-  waitFor(async () => {
-    const f = await emailFlags(id);
-    return f.customer_email_sent && f.workshop_email_sent;
-  });
+// Sends queued messages the way the worker does (the API only queues them)
+const quiet = { log() {}, warn() {}, error() {} };
+const deliverEmails = () => sendDueNotifications({ logger: quiet });
 
 beforeEach(async () => {
   await resetDb();
@@ -57,20 +53,20 @@ describe('POST /api/bookings', () => {
     expect(res.status).toBe(201);
     expect(res.body.booking).toMatchObject({ workshop_id: workshop.id, status: 'confirmed', urgency: 'normal' });
 
-    await waitForEmails(res.body.booking.id);
+    await deliverEmails();
     expect(sgMail.send).toHaveBeenCalledTimes(2);
     const recipients = sgMail.send.mock.calls.map(([msg]) => msg.to);
     expect(recipients).toEqual(expect.arrayContaining(['jane@example.com', workshop.email]));
   });
 
   test('escapes caller-provided text in email HTML but keeps the plain-text version readable', async () => {
-    const res = await createBooking({
+    await createBooking({
       ...validBooking(),
       customer_name: '<script>alert(1)</script> O\'Brien',
       issue_summary: 'Brakes <img src=x onerror=alert(1)>',
       urgency: 'urgent'
     });
-    await waitForEmails(res.body.booking.id);
+    await deliverEmails();
 
     for (const [msg] of sgMail.send.mock.calls) {
       expect(typeof msg.html).toBe('string');
@@ -85,18 +81,18 @@ describe('POST /api/bookings', () => {
 
   test('emails show the appointment in the shop\'s timezone, not the server\'s', async () => {
     // 09:00 UTC is 2:00 PM in Karachi (UTC+5); the shop default is Asia/Karachi
-    const res = await createBooking({ ...validBooking(), scheduled_at: '2030-01-15T09:00:00Z' });
-    await waitForEmails(res.body.booking.id);
+    await createBooking({ ...validBooking(), scheduled_at: '2030-01-15T09:00:00Z' });
+    await deliverEmails();
     for (const [msg] of sgMail.send.mock.calls) {
       expect(msg.text).toContain('Tuesday, January 15, 2030 at 2:00 PM');
     }
   });
 
   test('reuses the existing customer for the same phone number', async () => {
-    const first = await createBooking();
-    const second = await createBooking();
-    await waitForEmails(first.body.booking.id);
-    await waitForEmails(second.body.booking.id);
+    await createBooking();
+    await createBooking();
+    await deliverEmails();
+    await deliverEmails();
 
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM customers WHERE workshop_id = $1', [workshop.id]);
     expect(rows[0].n).toBe(1);
@@ -106,10 +102,10 @@ describe('POST /api/bookings', () => {
 describe('GET /api/bookings', () => {
   test('lists bookings filtered by workshop with a total', async () => {
     const other = await createWorkshop();
-    const mine = await createBooking();
-    const theirs = await createBooking({ ...validBooking(), workshop_id: other.id });
-    await waitForEmails(mine.body.booking.id);
-    await waitForEmails(theirs.body.booking.id);
+    await createBooking();
+    await createBooking({ ...validBooking(), workshop_id: other.id });
+    await deliverEmails();
+    await deliverEmails();
 
     const res = await api.get('/api/bookings').query({ workshop_id: workshop.id });
     expect(res.status).toBe(200);
@@ -124,7 +120,7 @@ describe('PUT /api/bookings/:id', () => {
   beforeEach(async () => {
     const { body } = await createBooking();
     bookingId = body.booking.id;
-    await waitForEmails(bookingId);
+    await deliverEmails();
   });
 
   test('updates allowed fields', async () => {
@@ -144,19 +140,18 @@ describe('PUT /api/bookings/:id', () => {
   });
 });
 
-describe('POST /api/bookings/notify', () => {
-  test('does not resend emails that were already sent', async () => {
-    const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
-
-    const res = await api.post('/api/bookings/notify').send({ bookingId: body.booking.id });
-    expect(res.status).toBe(200);
-    expect(sgMail.send).toHaveBeenCalledTimes(2); // from creation only, not 4
+describe('confirmation emails', () => {
+  test('are queued with the booking and never resent by later sender runs', async () => {
+    await createBooking();
+    expect(sgMail.send).not.toHaveBeenCalled(); // the API only queues; the worker sends
+    await deliverEmails();
+    await deliverEmails();
+    expect(sgMail.send).toHaveBeenCalledTimes(2);
   });
 
-  test('returns 500 for an unknown booking', async () => {
+  test('the removed /notify endpoint no longer exists', async () => {
     const res = await api.post('/api/bookings/notify').send({ bookingId: UNKNOWN_ID });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
   });
 });
 
@@ -168,7 +163,7 @@ describe('POST /api/bookings/notify', () => {
 describe('known bugs (fixed in Phase 1)', () => {
   test('GET /:id returns the booking with customer, vehicle and shop details', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     const res = await api.get(`/api/bookings/${body.booking.id}`);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -187,7 +182,7 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test('DELETE /:id cancels the booking and records when and why', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     const res = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'Customer called back' });
     expect(res.status).toBe(200);
     expect(res.body.booking).toMatchObject({ status: 'cancelled', cancellation_reason: 'Customer called back' });
@@ -196,7 +191,7 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test('cancelling twice keeps the original cancellation time and reason', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     const first = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'first' });
     const second = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'second' });
     expect(second.status).toBe(200);
@@ -206,7 +201,7 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test('PUT can still cancel a booking, and records when', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     const res = await api.put(`/api/bookings/${body.booking.id}`).send({ status: 'cancelled' });
     expect(res.status).toBe(200);
     expect(res.body.booking.status).toBe('cancelled');
@@ -215,7 +210,7 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test('PUT rejects an unknown status with a clear 400 instead of storing it', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     const res = await api.put(`/api/bookings/${body.booking.id}`).send({ status: 'done' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/status must be one of/);
@@ -223,7 +218,7 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test('a completed booking cannot be cancelled', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     await api.put(`/api/bookings/${body.booking.id}`).send({ status: 'completed' });
     const res = await api.delete(`/api/bookings/${body.booking.id}`);
     expect(res.status).toBe(409);
@@ -236,15 +231,12 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test('DELETE /:id works without a reason', async () => {
     const { body } = await createBooking();
-    await waitForEmails(body.booking.id);
+    await deliverEmails();
     const res = await api.delete(`/api/bookings/${body.booking.id}`);
     expect(res.status).toBe(200);
     expect(res.body.booking).toMatchObject({ status: 'cancelled', cancellation_reason: null });
   });
 
-  test.failing('reminders job exports sendReminders (file is a copy of routes/bookings.js)', () => {
-    expect(typeof require('../src/jobs/reminders').sendReminders).toBe('function');
-  });
 });
 
 describe('POST /api/bookings: scheduling and data rules', () => {
@@ -325,5 +317,75 @@ describe('POST /api/bookings: scheduling and data rules', () => {
     const res = await createBooking({ ...validBooking(), vehicle_year: 3020 });
     const { rows } = await pool.query('SELECT year FROM vehicles WHERE id = $1', [res.body.booking.vehicle_id]);
     expect(rows[0].year).toBeNull();
+  });
+});
+
+describe('PUT /api/bookings/:id: moving and re-opening use the same slot rules', () => {
+  const put = (id, body) => api.put(`/api/bookings/${id}`).send(body);
+  const other = (phone, at = '2030-01-16T09:00:00Z') =>
+    createBooking({ ...validBooking(), customer_phone: phone, scheduled_at: at });
+
+  test('moving to a free time works', async () => {
+    const { body } = await createBooking();
+    const res = await put(body.booking.id, { scheduled_at: '2030-01-16T09:00:00Z' });
+    expect(res.status).toBe(200);
+    expect(res.body.booking.scheduled_at).toBe('2030-01-16T09:00:00.000Z');
+  });
+
+  test('moving onto a full time is refused with alternatives, and nothing changes', async () => {
+    const { body } = await createBooking();
+    await other('+15550001111');
+    await other('+15550002222'); // Wednesday 2 PM now full (2 bays)
+    const res = await put(body.booking.id, { scheduled_at: '2030-01-16T09:00:00Z' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('SLOT_FULL');
+    expect(res.body.alternatives.length).toBeGreaterThan(0);
+    const { rows } = await pool.query('SELECT scheduled_at FROM bookings WHERE id = $1', [body.booking.id]);
+    expect(rows[0].scheduled_at.toISOString()).toBe('2030-01-15T09:00:00.000Z');
+  });
+
+  test('moving to a closed time is refused', async () => {
+    const { body } = await createBooking();
+    const res = await put(body.booking.id, { scheduled_at: '2030-01-13T09:00:00Z' }); // Sunday
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('CLOSED');
+  });
+
+  test('a booking does not block itself when it is re-saved or nudged within its own slot', async () => {
+    await pool.query('UPDATE workshops SET bay_count = 1 WHERE id = $1', [workshop.id]);
+    const { body } = await createBooking();
+    expect((await put(body.booking.id, { scheduled_at: '2030-01-15T09:00:00Z', urgency: 'urgent' })).status).toBe(200);
+    // 2:30 PM: overlaps its own current 2:00-3:00 booking, which must not count as taking the only bay
+    expect((await put(body.booking.id, { scheduled_at: '2030-01-15T09:30:00Z' })).status).toBe(200);
+  });
+
+  test('re-opening a cancelled booking is refused if its time has been taken', async () => {
+    await pool.query('UPDATE workshops SET bay_count = 1 WHERE id = $1', [workshop.id]);
+    const { body } = await createBooking();
+    await api.delete(`/api/bookings/${body.booking.id}`);
+    await other('+15550001111', '2030-01-15T09:00:00Z'); // someone else takes the freed bay
+    const res = await put(body.booking.id, { status: 'confirmed' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('SLOT_FULL');
+  });
+
+  test('re-opening a cancelled booking clears its cancellation details', async () => {
+    const { body } = await createBooking();
+    await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'changed mind' });
+    const res = await put(body.booking.id, { status: 'confirmed' });
+    expect(res.status).toBe(200);
+    expect(res.body.booking).toMatchObject({ status: 'confirmed', cancelled_at: null, cancellation_reason: null });
+  });
+
+  test('staff input is validated: unknown category or urgency, or an empty summary, is a 400', async () => {
+    const { body } = await createBooking();
+    const res = await put(body.booking.id, { issue_category: 'Weird Noise', urgency: 'ASAP', issue_summary: '  ' });
+    expect(res.status).toBe(400);
+    expect(res.body.details).toHaveLength(3);
+  });
+
+  test('an invalid date is a 400', async () => {
+    const { body } = await createBooking();
+    expect((await put(body.booking.id, { scheduled_at: 'next week' })).status).toBe(400);
   });
 });

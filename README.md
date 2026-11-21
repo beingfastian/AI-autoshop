@@ -49,7 +49,19 @@ npm --prefix server run dev            # API
 npm --prefix server run dev:worker     # background jobs (separate terminal)
 ```
 
-In production use `npm --prefix server start` and `npm --prefix server run worker`. Run exactly one worker so scheduled jobs don't fire twice.
+In production use `npm --prefix server start` and `npm --prefix server run worker`. **The worker must be running**: the API only queues confirmation emails, SMS and reminders, and the worker sends them (within about 5 seconds). Several workers are safe; they never send the same message twice.
+
+`/health` includes `notifications_overdue`: messages more than 5 minutes late. Anything above 0 means the worker is down or stuck, so alert on it.
+
+### Notifications
+
+Every email/SMS is a row in the `notifications` table (an outbox), written in the same transaction as the booking, so a failed booking never sends anything. The worker:
+- sends due rows and records the provider's message id;
+- retries temporary failures after 1, 5, 15 and 60 minutes, and marks a message `failed` after 5 attempts or straight away on a permanent error (e.g. invalid address);
+- skips messages for cancelled bookings and reminders for appointments that have already started;
+- queues reminders 24h and 2h before each confirmed appointment (no 24h reminder for bookings made less than a day ahead).
+
+SMS is off unless `ENABLE_SMS=true` (see `server/.env.example`).
 
 Health check: `GET http://localhost:3001/health`.
 

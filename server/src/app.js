@@ -8,6 +8,7 @@ require('dotenv').config();
 
 const { pool } = require('./config/database');
 const { requireApiKey } = require('./middleware/apiKey');
+const { overdueCount } = require('./services/notifications');
 const callRoutes = require('./routes/calls');
 const webhookRoutes = require('./routes/webhooks');
 const bookingRoutes = require('./routes/bookings');
@@ -41,7 +42,14 @@ app.use(['/api/calls', '/api/webhooks'], rateLimit({
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'healthy', service: 'ai-receptionist', timestamp: new Date().toISOString() });
+    // Messages more than 5 minutes overdue mean the worker is down or stuck: alert on this
+    const notificationsOverdue = await overdueCount(5);
+    res.json({
+      status: 'healthy',
+      service: 'ai-receptionist',
+      notifications_overdue: notificationsOverdue,
+      timestamp: new Date().toISOString()
+    });
   } catch (e) {
     console.error('Health check failed:', e);
     res.status(503).json({ status: 'unhealthy', service: 'ai-receptionist' });

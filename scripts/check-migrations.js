@@ -80,13 +80,14 @@ async function checkDataSurvives() {
 
   const ids = await withClient(async (c) => {
     const w = await c.query(`INSERT INTO workshops (name, email, phone, timezone) VALUES ('Old Shop', 'old@test.local', '+920000000', 'Asia/Karachi') RETURNING id`);
-    const cu = await c.query(`INSERT INTO customers (workshop_id, name, phone) VALUES ($1, 'Ali', '+923001234567') RETURNING id`, [w.rows[0].id]);
+    const cu = await c.query(`INSERT INTO customers (workshop_id, name, phone, email) VALUES ($1, 'Ali', '+923001234567', 'Ali@Example.com') RETURNING id`, [w.rows[0].id]);
     const call = await c.query(`INSERT INTO calls (workshop_id, from_number, to_number, status) VALUES ($1, '+923001234567', '+920000000', 'completed') RETURNING id`, [w.rows[0].id]);
     const b = await c.query(
-      `INSERT INTO bookings (workshop_id, customer_id, call_id, scheduled_at, issue_summary, status, customer_email_sent)
-       VALUES ($1, $2, $3, '2030-01-15 14:00:00', 'Brake noise', 'cancelled', true) RETURNING id`,
+      `INSERT INTO bookings (workshop_id, customer_id, call_id, scheduled_at, issue_summary, status, customer_email_sent, workshop_email_sent)
+       VALUES ($1, $2, $3, '2030-01-15 14:00:00', 'Brake noise', 'cancelled', true, true) RETURNING id`,
       [w.rows[0].id, cu.rows[0].id, call.rows[0].id]
     );
+    await c.query("INSERT INTO booking_reminders (booking_id, reminder_type) VALUES ($1, '24h')", [b.rows[0].id]);
     return { workshop: w.rows[0].id, booking: b.rows[0].id };
   });
 
@@ -95,7 +96,7 @@ async function checkDataSurvives() {
   await withClient(async (c) => {
     const tz = (await c.query('SHOW TimeZone')).rows[0].TimeZone;
     const { rows } = await c.query(
-      `SELECT b.status, b.customer_email_sent, b.cancelled_at,
+      `SELECT b.status, b.cancelled_at,
               to_char(b.scheduled_at AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI') AS local_time,
               w.timezone, w.slot_minutes, w.bay_count, w.notify_emails
          FROM bookings b JOIN workshops w ON w.id = b.workshop_id WHERE b.id = $1`,
@@ -104,10 +105,21 @@ async function checkDataSurvives() {
     const row = rows[0];
     assert(row, 'the booking written before the migrations is gone');
     assert(row.local_time === '2030-01-15 14:00', `scheduled_at changed meaning: ${row.local_time}`);
-    assert(row.status === 'cancelled' && row.customer_email_sent === true, 'booking fields changed');
+    assert(row.status === 'cancelled', 'booking fields changed');
     assert(row.cancelled_at === null, 'old cancelled booking should keep a NULL cancelled_at (constraint is NOT VALID)');
     assert(row.timezone === 'Asia/Karachi' && row.slot_minutes === 60 && row.bay_count === 2, 'workshop defaults not applied');
     assert(Array.isArray(row.notify_emails) && row.notify_emails.length === 0, 'notify_emails default not applied');
+
+    // 0007: what the old flags and booking_reminders recorded as sent is kept as sent notifications
+    const sent = await c.query("SELECT kind, recipient FROM notifications WHERE booking_id = $1 AND status = 'sent' AND sent_at IS NOT NULL ORDER BY kind", [ids.booking]);
+    assert(
+      JSON.stringify(sent.rows) === JSON.stringify([
+        { kind: 'booking_confirmation_customer', recipient: 'ali@example.com' },
+        { kind: 'booking_notification_workshop', recipient: 'old@test.local' },
+        { kind: 'reminder_24h', recipient: 'ali@example.com' }
+      ]),
+      `send history was not carried over: ${JSON.stringify(sent.rows)}`
+    );
   });
   console.log('  ✓ data written under the original schema survives all migrations');
 }

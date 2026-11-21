@@ -158,3 +158,29 @@ describe('safeHtml', () => {
     );
   });
 });
+
+describe('SMS configuration', () => {
+  test('SMS settings are optional while SMS is off', () => {
+    expect(() => validateEnv({ ...VALID_ENV, ENABLE_SMS: 'false' })).not.toThrow();
+  });
+
+  test('turning SMS on without Twilio settings fails at startup with a clear message', () => {
+    expect(() => validateEnv({ ...VALID_ENV, ENABLE_SMS: 'true' })).toThrow(
+      /TWILIO_ACCOUNT_SID is required when ENABLE_SMS=true[\s\S]*TWILIO_AUTH_TOKEN is required when ENABLE_SMS=true[\s\S]*TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID is required/
+    );
+  });
+
+  test('a messaging service can be used instead of a phone number', () => {
+    expect(() => validateEnv({
+      ...VALID_ENV,
+      ENABLE_SMS: 'true',
+      TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+      TWILIO_AUTH_TOKEN: 'test-auth-token-123456',
+      TWILIO_MESSAGING_SERVICE_SID: 'MG00000000000000000000000000000000'
+    })).not.toThrow();
+  });
+
+  test('a phone number must be in international format', () => {
+    expect(() => validateEnv({ ...VALID_ENV, TWILIO_PHONE_NUMBER: '0300 1234567' })).toThrow(/TWILIO_PHONE_NUMBER must be in international format/);
+  });
+});

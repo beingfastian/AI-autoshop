@@ -8,6 +8,9 @@ const request = require('supertest');
 const sgMail = require('@sendgrid/mail');
 const app = require('../src/app');
 const { pool, resetDb, createWorkshop, waitFor, sleep } = require('./helpers');
+const { sendDueNotifications } = require('../src/services/notifications');
+
+const deliverEmails = () => sendDueNotifications({ logger: { log() {}, warn() {}, error() {} } });
 
 const AUTH = 'Bearer test-webhook-secret';
 
@@ -152,17 +155,21 @@ describe('phone bookings', () => {
 
   test('a phone booking emails the customer and the shop', async () => {
     await postCallEnded(endOfCallReport());
-    await waitFor(() => sgMail.send.mock.calls.length === 2);
+    await waitForBooking();
+    await deliverEmails();
+    expect(sgMail.send).toHaveBeenCalledTimes(2);
     const recipients = sgMail.send.mock.calls.map(([m]) => m.to);
     expect(recipients).toEqual(expect.arrayContaining(['jane@example.com', workshop.email]));
   });
 
   test('a retried webhook is handled cleanly: no second booking, no second email, no error', async () => {
     await postCallEnded(endOfCallReport());
-    await waitFor(() => sgMail.send.mock.calls.length === 2);
+    await waitForBooking();
+    await deliverEmails();
     const error = jest.spyOn(console, 'error');
     await postCallEnded(endOfCallReport());
     await sleep(500);
+    await deliverEmails();
     expect(await bookingsForCall()).toHaveLength(1);
     expect(sgMail.send).toHaveBeenCalledTimes(2);
     expect(error).not.toHaveBeenCalled();
