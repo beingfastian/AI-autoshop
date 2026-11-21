@@ -6,7 +6,7 @@ jest.mock('@sendgrid/mail', () => ({
 
 const request = require('supertest');
 const sgMail = require('@sendgrid/mail');
-const app = require('../src/index');
+const app = require('../src/app');
 const { pool, resetDb, createWorkshop, waitFor } = require('./helpers');
 
 const UNKNOWN_ID = '00000000-0000-0000-0000-000000000000';
