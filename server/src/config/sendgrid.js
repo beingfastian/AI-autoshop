@@ -390,9 +390,54 @@ async function sendBookingReminder(bookingData) {
   });
 }
 
+/**
+ * Alert the shop that a caller needs a call back (the AI could not book them)
+ */
+async function sendCallbackRequest(data) {
+  const { workshopEmail, workshopName, customerName, customerPhone, callTime, issueSummary, summary } = data;
+
+  const subject = `Call back needed: ${customerName} (${customerPhone})`;
+
+  const html = safeHtml`
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+      <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #FF9800; color: white; padding: 20px; text-align: center;">
+          <h1>📞 Call back needed</h1>
+        </div>
+        <div style="background: #f9f9f9; padding: 20px; margin: 20px 0;">
+          <p>A caller to ${workshopName} wanted an appointment, but the AI receptionist could not book one.</p>
+          <p><strong>Name:</strong> ${customerName}<br/>
+             <strong>Phone:</strong> <a href="tel:${customerPhone}">${customerPhone}</a><br/>
+             <strong>Called:</strong> ${callTime}</p>
+          <p><strong>Problem:</strong> ${issueSummary || 'Not captured'}</p>
+          <p><strong>Call summary:</strong> ${summary || 'Not available'}</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const text = `
+Call back needed
+
+A caller to ${workshopName} wanted an appointment, but the AI receptionist could not book one.
+
+Name: ${customerName}
+Phone: ${customerPhone}
+Called: ${callTime}
+Problem: ${issueSummary || 'Not captured'}
+Call summary: ${summary || 'Not available'}
+  `;
+
+  return sendEmail({ to: workshopEmail, subject, text, html });
+}
+
 module.exports = {
   sendEmail,
   sendBookingConfirmationCustomer,
   sendBookingNotificationWorkshop,
-  sendBookingReminder
+  sendBookingReminder,
+  sendCallbackRequest
 };

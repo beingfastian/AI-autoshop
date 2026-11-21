@@ -1,5 +1,6 @@
 // The worker's loops. The outbox functions are mocked here; their real behavior is tested
 // against the database in notifications.test.js.
+jest.mock('../src/services/voiceCalls', () => ({ retryCallReports: jest.fn().mockResolvedValue(0) }));
 jest.mock('../src/services/notifications', () => ({
   sendDueNotifications: jest.fn(),
   sweepReminders: jest.fn()

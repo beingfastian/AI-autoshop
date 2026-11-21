@@ -7,10 +7,10 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { pool } = require('./config/database');
-const { requireApiKey } = require('./middleware/apiKey');
+const { requireApiKey, requireVoiceAgentKey } = require('./middleware/apiKey');
 const { overdueCount } = require('./services/notifications');
 const callRoutes = require('./routes/calls');
-const webhookRoutes = require('./routes/webhooks');
+const voiceRoutes = require('./routes/voice');
 const bookingRoutes = require('./routes/bookings');
 
 const app = express();
@@ -30,8 +30,9 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate limit (call and webhook routes only, as before the merge)
-app.use(['/api/calls', '/api/webhooks'], rateLimit({
+// Rate limit staff call routes. Not /api/voice: all agent traffic comes from the voice provider's
+// shared servers, so a per-IP limit would throttle every shop's calls at once; it uses its own key.
+app.use('/api/calls', rateLimit({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
   max: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 100),
   standardHeaders: true,
@@ -56,9 +57,9 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Routes. Webhooks authenticate with the Vapi secret instead of the API key.
+// Routes. The voice agent has its own key, separate from the staff API key.
 app.use('/api/calls', requireApiKey, callRoutes);
-app.use('/api/webhooks', webhookRoutes);
+app.use('/api/voice', requireVoiceAgentKey, voiceRoutes);
 app.use('/api/bookings', requireApiKey, bookingRoutes);
 
 // 404

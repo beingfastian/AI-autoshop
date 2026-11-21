@@ -14,7 +14,7 @@ afterAll(() => pool.end());
 
 const VALID_ENV = {
   API_KEY: 'k'.repeat(32),
-  VAPI_WEBHOOK_SECRET: 's'.repeat(16),
+  VOICE_AGENT_KEY: 'v'.repeat(32),
   SENDGRID_API_KEY: 'SG.abc',
   SENDGRID_FROM_EMAIL: 'noreply@example.com'
 };
@@ -26,7 +26,7 @@ describe('environment validation', () => {
 
   test('lists every missing variable in one clear error', () => {
     expect(() => validateEnv({})).toThrow(
-      /API_KEY is missing[\s\S]*VAPI_WEBHOOK_SECRET is missing[\s\S]*SENDGRID_API_KEY is missing/
+      /API_KEY is missing[\s\S]*VOICE_AGENT_KEY is missing[\s\S]*SENDGRID_API_KEY is missing/
     );
   });
 
@@ -79,12 +79,15 @@ describe('API key on /api routes', () => {
     expect(res.status).toBe(200);
   });
 
-  test('webhooks use the Vapi secret, not the API key', async () => {
-    const res = await request(app)
-      .post('/api/webhooks/vapi/call-ended')
-      .set('Authorization', `Bearer ${process.env.VAPI_WEBHOOK_SECRET}`)
-      .send({ message: { type: 'end-of-call-report', call: {} } });
-    expect(res.status).toBe(200);
+  test('the voice agent uses its own key: the staff key does not open /api/voice, and vice versa', async () => {
+    const start = { provider_call_id: 'x', to_number: '+15550009999' };
+    const voiceAuth = `Bearer ${process.env.VOICE_AGENT_KEY}`;
+    const withVoiceKey = await request(app).post('/api/voice/calls').set('Authorization', voiceAuth).send(start);
+    const withStaffKey = await request(app).post('/api/voice/calls').set('Authorization', `Bearer ${process.env.API_KEY}`).send(start);
+    const staffRouteWithVoiceKey = await request(app).get('/api/bookings').set('x-api-key', process.env.VOICE_AGENT_KEY);
+    expect(withVoiceKey.status).toBe(200);
+    expect(withStaffKey.status).toBe(401);
+    expect(staffRouteWithVoiceKey.status).toBe(401);
   });
 
   test('/health stays public', async () => {
@@ -94,23 +97,23 @@ describe('API key on /api routes', () => {
 });
 
 describe('error responses do not leak internals', () => {
-  test('a failing webhook does not return the database error text', async () => {
+  test('a failing voice request does not return the database error text', async () => {
     await resetDb();
     const workshop = await createWorkshop();
-    const inbound = await request(app)
-      .post('/api/calls/inbound')
-      .set('x-api-key', process.env.API_KEY)
-      .send({ from: '+15559998888', to: workshop.vapi_phone_number, callSid: 'CA-1' });
+    const { rows } = await pool.query(
+      `INSERT INTO calls (workshop_id, from_number, to_number, provider_call_id) VALUES ($1, '+15559998888', $2, 'CA-1') RETURNING id`,
+      [workshop.id, workshop.ai_phone_number]
+    );
     const error = jest.spyOn(console, 'error').mockImplementation(() => {});
     const dbFailure = jest.spyOn(pool, 'query').mockRejectedValueOnce(new Error('relation "calls" is locked by user admin'));
 
     const res = await request(app)
-      .post('/api/webhooks/vapi/call-started')
-      .set('Authorization', `Bearer ${process.env.VAPI_WEBHOOK_SECRET}`)
-      .send({ message: { call: { metadata: { call_id: inbound.body.call_id } } } });
+      .post(`/api/voice/calls/${rows[0].id}/answered`)
+      .set('Authorization', `Bearer ${process.env.VOICE_AGENT_KEY}`);
 
     expect(error).toHaveBeenCalled(); // the real error is logged...
-    expect(res.body).toEqual({ received: true }); // ...but not sent back
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toMatch(/locked|relation/); // ...but not sent back
     dbFailure.mockRestore();
     error.mockRestore();
   });

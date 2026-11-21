@@ -16,7 +16,8 @@ const { query: poolQuery, getClient } = require('../config/database');
 const {
   sendBookingConfirmationCustomer,
   sendBookingNotificationWorkshop,
-  sendBookingReminder
+  sendBookingReminder,
+  sendCallbackRequest
 } = require('../config/sendgrid');
 const { sendSms, smsEnabled } = require('./sms');
 
@@ -66,6 +67,45 @@ async function queueBookingNotifications(client, bookingId) {
       [bookingId, channel, kind, recipient]
     );
   }
+}
+
+/**
+ * Alerts the shop that a caller needs a call back (they wanted a booking the AI couldn't make).
+ * Call inside the transaction that records the call's outcome.
+ */
+async function queueCallbackAlert(client, callId) {
+  const { rows } = await client.query(
+    `SELECT w.email, w.notify_emails, w.notify_sms
+       FROM calls c JOIN workshops w ON w.id = c.workshop_id WHERE c.id = $1`,
+    [callId]
+  );
+  const w = rows[0];
+  if (!w) return;
+  const messages = unique([lower(w.email), ...(w.notify_emails || []).map(lower)]).map((r) => ['email', r]);
+  if (smsEnabled()) for (const phone of unique(w.notify_sms || [])) messages.push(['sms', phone]);
+  for (const [channel, recipient] of messages) {
+    await client.query(
+      `INSERT INTO notifications (call_id, channel, kind, recipient)
+       VALUES ($1, $2, 'callback_requested', $3)
+       ON CONFLICT DO NOTHING`,
+      [callId, channel, recipient]
+    );
+  }
+}
+
+async function loadCallDetails(db, callId) {
+  const { rows } = await db.query(
+    `SELECT c.id, c.from_number, c.started_at, c.provider_call_id,
+            a.customer_name, a.customer_phone, a.issue_keywords AS issue_summary,
+            a.structured_data ->> 'summary' AS summary,
+            w.name AS workshop_name, w.timezone AS workshop_timezone
+       FROM calls c
+       JOIN workshops w ON w.id = c.workshop_id
+       LEFT JOIN call_analysis a ON a.call_id = c.id
+      WHERE c.id = $1`,
+    [callId]
+  );
+  return rows[0];
 }
 
 /** Adds reminder rows that have become due. Safe to run as often as you like. Returns rows added. */
@@ -146,6 +186,7 @@ function smsText(kind, b, when) {
 
 // Sends one message; returns the provider's message id
 async function deliver(notification, booking) {
+  if (notification.kind === 'callback_requested') return deliverCallbackAlert(notification, booking);
   const when = formatAppointment(booking);
 
   if (notification.channel === 'sms') {
@@ -201,8 +242,31 @@ async function deliver(notification, booking) {
   return response?.[0]?.headers?.['x-message-id'] || null;
 }
 
+// The caller details the shop needs to phone them back
+async function deliverCallbackAlert(notification, call) {
+  const phone = call.customer_phone || call.from_number;
+  const name = call.customer_name || 'A caller';
+  const when = new Date(call.started_at).toLocaleString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: call.workshop_timezone
+  });
+  if (notification.channel === 'sms') {
+    return sendSms({ to: notification.recipient, body: `Call back needed: ${name} (${phone}) called ${when}. ${call.issue_summary || ''}`.slice(0, 320) });
+  }
+  const response = await sendCallbackRequest({
+    workshopEmail: notification.recipient,
+    workshopName: call.workshop_name,
+    customerName: name,
+    customerPhone: phone,
+    callTime: when,
+    issueSummary: call.issue_summary,
+    summary: call.summary
+  });
+  return response?.[0]?.headers?.['x-message-id'] || null;
+}
+
 // Why a queued message should no longer go out, or null if it should
 function reasonToSkip(notification, booking, now) {
+  if (notification.call_id) return booking ? null : 'call no longer exists';
   if (!booking) return 'booking no longer exists';
   if (booking.status !== ACTIVE_BOOKING) return `booking is ${booking.status}`;
   if (notification.kind.startsWith('reminder_') && new Date(booking.scheduled_at) <= now) return 'appointment already started';
@@ -246,7 +310,10 @@ async function sendDueNotifications({ now = new Date(), limit = 20, logger = con
         break;
       }
 
-      const booking = await loadBookingDetails(client, notification.booking_id);
+      // Messages are about a booking, or (callback alerts) about a call
+      const booking = notification.call_id
+        ? await loadCallDetails(client, notification.call_id)
+        : await loadBookingDetails(client, notification.booking_id);
       const skip = reasonToSkip(notification, booking, now);
       if (skip) {
         await client.query(
@@ -277,7 +344,7 @@ async function sendDueNotifications({ now = new Date(), limit = 20, logger = con
               WHERE id = $1`,
             [notification.id, attempts, describe(error), giveUp, now, delay]
           );
-          const label = `${notification.channel} ${notification.kind} for booking ${notification.booking_id}`;
+          const label = `${notification.channel} ${notification.kind} for ${notification.call_id ? `call ${notification.call_id}` : `booking ${notification.booking_id}`}`;
           if (giveUp) {
             counts.failed++;
             logger.error(`❌ Giving up on ${label} after ${attempts} attempt(s): ${describe(error)}`);
@@ -310,6 +377,7 @@ async function overdueCount(minutes = 5) {
 
 module.exports = {
   queueBookingNotifications,
+  queueCallbackAlert,
   sweepReminders,
   resetReminders,
   sendDueNotifications,

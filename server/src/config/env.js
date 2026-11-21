@@ -17,8 +17,8 @@ const schema = z.object({
   // Interim auth for /api/calls and /api/bookings until real accounts exist
   API_KEY: z.string().min(32, 'must be at least 32 characters (e.g. `openssl rand -hex 32`)'),
 
-  // Vapi sends this with every webhook; without it, webhook auth would compare against "undefined"
-  VAPI_WEBHOOK_SECRET: z.string().min(16, 'must be at least 16 characters'),
+  // The voice agent's key for /api/voice (separate from API_KEY)
+  VOICE_AGENT_KEY: z.string().min(32, 'must be at least 32 characters (e.g. `openssl rand -hex 32`)'),
 
   // Email
   SENDGRID_API_KEY: z.string().startsWith('SG.', 'must start with "SG."'),

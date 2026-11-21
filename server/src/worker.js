@@ -1,12 +1,15 @@
-// server/src/worker.js - background process: sends queued notifications and queues reminders.
+// server/src/worker.js - background process: sends queued notifications, queues reminders and
+// retries end-of-call reports that failed to process (so a DB blip can't lose a call-back alert).
 // Run exactly one or several; the outbox claims rows with SKIP LOCKED, so workers never double-send.
 require('dotenv').config();
 
 const { pool } = require('./config/database');
 const { sendDueNotifications, sweepReminders } = require('./services/notifications');
+const { retryCallReports } = require('./services/voiceCalls');
 
 const SEND_INTERVAL_MS = 5 * 1000; // confirmations go out within seconds of a booking
 const REMINDER_INTERVAL_MS = 15 * 60 * 1000;
+const CALL_REPORT_RETRY_MS = 60 * 1000;
 
 // Runs `task` now and then every `intervalMs` after it finishes. A failing run is logged and the
 // loop carries on; runs never overlap. stop() waits for a run in progress to finish.
@@ -34,7 +37,12 @@ function every(name, intervalMs, task, logger) {
   };
 }
 
-function startWorker({ logger = console, sendIntervalMs = SEND_INTERVAL_MS, reminderIntervalMs = REMINDER_INTERVAL_MS } = {}) {
+function startWorker({
+  logger = console,
+  sendIntervalMs = SEND_INTERVAL_MS,
+  reminderIntervalMs = REMINDER_INTERVAL_MS,
+  callReportIntervalMs = CALL_REPORT_RETRY_MS
+} = {}) {
   const stops = [
     every('Reminder sweep', reminderIntervalMs, async () => {
       const added = await sweepReminders();
@@ -43,6 +51,10 @@ function startWorker({ logger = console, sendIntervalMs = SEND_INTERVAL_MS, remi
     every('Notification sender', sendIntervalMs, async () => {
       const counts = await sendDueNotifications({ logger });
       if (counts.sent || counts.failed || counts.retrying || counts.skipped) logger.log('📨 Notifications:', counts);
+    }, logger),
+    every('Call report retry', callReportIntervalMs, async () => {
+      const retried = await retryCallReports();
+      if (retried) logger.log(`📞 Retried ${retried} call report(s)`);
     }, logger)
   ];
   return { stop: () => Promise.all(stops.map((stop) => stop())) };
@@ -69,4 +81,4 @@ if (require.main === module) {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-module.exports = { startWorker, SEND_INTERVAL_MS, REMINDER_INTERVAL_MS };
+module.exports = { startWorker, SEND_INTERVAL_MS, REMINDER_INTERVAL_MS, CALL_REPORT_RETRY_MS };
