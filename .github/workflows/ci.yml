@@ -47,6 +47,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             server/package-lock.json
+            agent/package-lock.json
 
       - name: Configure database via DB_* variables
         if: matrix.db-config == 'db-vars'
@@ -64,6 +65,7 @@ jobs:
         run: |
           npm ci
           npm ci --prefix server
+          npm ci --prefix agent
 
       - name: Lint
         run: npm run lint

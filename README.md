@@ -67,6 +67,24 @@ SMS is off unless `ENABLE_SMS=true` (see `server/.env.example`).
 
 Health check: `GET http://localhost:3001/health`.
 
+## Voice agent (LiveKit)
+
+`agent/` answers the phone. For building and demos it uses free tiers: **LiveKit Cloud** (call handling, one free US number), **Deepgram** (speech to text and voice) and **Groq** (the LLM). All receptionist logic lives in the server; the agent calls `/api/voice` on every call, so the voice provider can be swapped later without touching it.
+
+1. `cp agent/.env.example agent/.env` and fill in the keys. `VOICE_AGENT_KEY` must equal the one in `server/.env`.
+2. Give a test shop the AI number used by browser test calls (`DEMO_SHOP_NUMBER`):
+   `UPDATE workshops SET ai_phone_number = '+15551112222' WHERE email = 'joe@joeauto.com';`
+3. Start the API, the worker and the agent, each in its own terminal:
+   ```bash
+   npm --prefix server run dev
+   npm --prefix server run dev:worker
+   npm --prefix agent run dev
+   ```
+4. **Browser test call:** open https://agents-playground.livekit.io, connect to your LiveKit project and talk.
+5. **Phone test call:** in LiveKit Cloud, claim the free US number (Telephony) and add an inbound dispatch rule. Then set the shop's `ai_phone_number` to that number.
+
+Free tiers are for building and demos with test data only. Real customer calls need paid plans with data-processing agreements.
+
 ## Tests and lint
 
 ```bash

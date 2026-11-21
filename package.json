@@ -9,8 +9,8 @@
     "db:migrate:down": "node scripts/migrate.js down",
     "db:seed": "node scripts/seed.js",
     "test:db:prepare": "node scripts/test-db.js",
-    "test": "npm run test:scripts && npm run test:migrations && npm --prefix server test",
-    "install:all": "npm install && npm --prefix server install",
+    "test": "npm run test:scripts && npm run test:migrations && npm --prefix server test && npm --prefix agent test",
+    "install:all": "npm install && npm --prefix server install && npm --prefix agent install",
     "test:scripts": "jest",
     "test:migrations": "node scripts/check-migrations.js"
   },
