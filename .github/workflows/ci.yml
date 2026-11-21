@@ -46,8 +46,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            voice-service/package-lock.json
-            booking-service/package-lock.json
+            server/package-lock.json
 
       - name: Configure database via DB_* variables
         if: matrix.db-config == 'db-vars'
@@ -64,8 +63,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          npm ci --prefix voice-service
-          npm ci --prefix booking-service
+          npm ci --prefix server
 
       - name: Lint
         run: npm run lint
