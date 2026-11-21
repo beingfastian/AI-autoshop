@@ -1,32 +1,37 @@
 // Creates (if needed) and resets the test database, then applies all migrations.
-// Used as Jest globalSetup by both services; also runnable directly.
+// Used as Jest globalSetup by the server tests; also runnable directly.
 const { Client } = require('pg');
 const { TEST_DB_NAME, connectionConfig } = require('./db-config');
 const { migrate } = require('./migrate');
 
-async function prepareTestDb() {
+// Creates the database if needed and empties it. Only ever touches names ending in _test.
+async function resetDatabase(database) {
   // Guard against ever wiping a real database
-  if (!TEST_DB_NAME.endsWith('_test')) {
-    throw new Error(`Refusing to reset "${TEST_DB_NAME}": test DB name must end with _test`);
+  if (!database.endsWith('_test')) {
+    throw new Error(`Refusing to reset "${database}": test DB name must end with _test`);
   }
 
   const admin = new Client(connectionConfig('postgres'));
   await admin.connect();
   try {
-    const { rowCount } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [TEST_DB_NAME]);
-    if (rowCount === 0) await admin.query(`CREATE DATABASE "${TEST_DB_NAME}"`);
+    const { rowCount } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [database]);
+    if (rowCount === 0) await admin.query(`CREATE DATABASE "${database}"`);
   } finally {
     await admin.end();
   }
 
-  const db = new Client(connectionConfig(TEST_DB_NAME));
+  const db = new Client(connectionConfig(database));
   await db.connect();
   try {
     await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   } finally {
     await db.end();
   }
+}
 
+// Jest passes its own config objects as arguments, so this takes none
+async function prepareTestDb() {
+  await resetDatabase(TEST_DB_NAME);
   await migrate({ database: TEST_DB_NAME });
 }
 
@@ -40,3 +45,4 @@ if (require.main === module) {
 }
 
 module.exports = prepareTestDb;
+module.exports.resetDatabase = resetDatabase;
