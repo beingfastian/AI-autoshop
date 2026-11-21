@@ -3,18 +3,19 @@
 const { parseRequestedTime, normalizePhone } = require('../src/services/bookings');
 
 describe('parseRequestedTime', () => {
-  const karachi = (date, time) => parseRequestedTime(date, time, 'Asia/Karachi')?.toISOString() ?? null;
+  // January in New York is UTC-5
+  const newYork = (date, time) => parseRequestedTime(date, time, 'America/New_York')?.toISOString() ?? null;
 
   test.each([
-    ['14:00', '2030-01-15T09:00:00.000Z'],
-    ['9:30', '2030-01-15T04:30:00.000Z'],
-    ['2pm', '2030-01-15T09:00:00.000Z'],
-    ['2 PM', '2030-01-15T09:00:00.000Z'],
-    ['2:30 p.m.', '2030-01-15T09:30:00.000Z'],
-    ['12pm', '2030-01-15T07:00:00.000Z'], // noon
-    ['12am', '2030-01-14T19:00:00.000Z'] // midnight
+    ['14:00', '2030-01-15T19:00:00.000Z'],
+    ['9:30', '2030-01-15T14:30:00.000Z'],
+    ['2pm', '2030-01-15T19:00:00.000Z'],
+    ['2 PM', '2030-01-15T19:00:00.000Z'],
+    ['2:30 p.m.', '2030-01-15T19:30:00.000Z'],
+    ['12pm', '2030-01-15T17:00:00.000Z'], // noon
+    ['12am', '2030-01-15T05:00:00.000Z'] // midnight
   ])('reads %p in the shop\'s timezone', (time, expected) => {
-    expect(karachi('2030-01-15', time)).toBe(expected);
+    expect(newYork('2030-01-15', time)).toBe(expected);
   });
 
   test.each([
@@ -28,7 +29,7 @@ describe('parseRequestedTime', () => {
     ['2030-01-15', null, 'missing time'],
     [undefined, undefined, 'nothing captured']
   ])('returns null for %p %p (%s)', (date, time) => {
-    expect(karachi(date, time)).toBeNull();
+    expect(newYork(date, time)).toBeNull();
   });
 
   test('a time skipped by a daylight-saving change is not guessed', () => {
@@ -38,17 +39,29 @@ describe('parseRequestedTime', () => {
   });
 });
 
-describe('normalizePhone', () => {
+describe('normalizePhone (US launch market)', () => {
   test.each([
-    ['+92 300-123 4567', '+923001234567'],
-    ['+923001234567', '+923001234567'],
-    ['(0300) 123-4567', '03001234567'],
-    ['  +1 555 999 8888 ', '+15559998888']
+    ['(415) 555-0123', '+14155550123'],
+    ['415.555.0123', '+14155550123'],
+    ['4155550123', '+14155550123'],
+    ['1-415-555-0123', '+14155550123'],
+    ['+1 415 555 0123', '+14155550123'],
+    ['  +14155550123 ', '+14155550123'],
+    ['+44 20 7946 0958', '+442079460958'] // a visitor's foreign number, written with its country code
   ])('%p -> %p', (input, expected) => {
     expect(normalizePhone(input)).toBe(expected);
   });
 
-  test.each(['', '123', 'call me', null, undefined, '+1234567890123456'])('rejects %p', (input) => {
+  test.each([
+    ['', 'empty'],
+    ['555-0123', 'no area code'],
+    ['(015) 555-0123', 'area codes never start with 0 or 1'],
+    ['020 7946 0958', 'foreign number without a country code: ambiguous'],
+    ['415-555-0123 ext 12', 'extension makes it ambiguous'],
+    ['call me', 'not a number'],
+    [null, 'missing'],
+    ['+1234567890123456', 'too long']
+  ])('rejects %p (%s)', (input) => {
     expect(normalizePhone(input)).toBeNull();
   });
 });

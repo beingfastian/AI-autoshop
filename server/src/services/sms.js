@@ -1,6 +1,6 @@
 // SMS through Twilio's REST API (Node's built-in fetch; no SDK needed for one endpoint).
-// Off unless ENABLE_SMS=true: business texting needs sender registration that depends on the
-// market (A2P 10DLC in the US, sender-ID rules in Pakistan), so email stays the required channel.
+// Off unless ENABLE_SMS=true: US business texting needs A2P 10DLC registration (brand and
+// campaign approval, which takes weeks) before carriers deliver it, so email stays the required channel.
 const TWILIO_API = 'https://api.twilio.com/2010-04-01';
 const TIMEOUT_MS = 15000;
 

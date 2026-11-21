@@ -1,6 +1,8 @@
 # AI Autoshop Receptionist
 
-AI phone receptionist for auto repair shops. Callers talk to a Vapi voice agent; call results are stored in Postgres, turned into bookings, and confirmed by email.
+AI phone receptionist for auto repair shops. Callers talk to a voice agent; call results are stored in Postgres, turned into bookings, and confirmed by email.
+
+**Launch market: US only.** Every shop must have its own timezone (e.g. `America/New_York`, `America/Chicago`, `America/Denver`, `America/Phoenix`, `America/Los_Angeles`); there is no default, because a wrong one shifts every slot and reminder by hours. Times are shown in US format, and phone numbers without a country code are read as US numbers.
 
 ## Repository layout
 

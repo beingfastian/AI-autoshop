@@ -30,13 +30,18 @@ const clean = (value, max) => {
   return text ? text.slice(0, max) : null;
 };
 
-// Keeps a leading + and digits only: "+92 300-123 4567" and "+923001234567" are the same customer
+// E.164 (+ and digits), so "(415) 555-0123", "415.555.0123", "1-415-555-0123" and "+14155550123"
+// are all the same customer. The launch market is the US: a number without a country code is
+// read as a US number (10 digits, or 11 starting with 1). Anything else without a "+" is
+// ambiguous and rejected rather than guessed; numbers written with "+" keep their country code.
 function normalizePhone(value) {
   const text = clean(value, 40);
   if (!text) return null;
   const digits = text.replace(/\D/g, '');
-  if (digits.length < 7 || digits.length > 15) return null;
-  return (text.startsWith('+') ? '+' : '') + digits;
+  if (text.startsWith('+')) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
+  if (digits.length === 10 && /^[2-9]/.test(digits)) return `+1${digits}`;
+  if (digits.length === 11 && /^1[2-9]/.test(digits)) return `+${digits}`;
+  return null;
 }
 
 function normalizeEmail(value) {

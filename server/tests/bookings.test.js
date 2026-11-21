@@ -25,7 +25,7 @@ const validBooking = () => ({
   vehicle_year: 2018,
   issue_summary: 'Grinding noise when braking',
   issue_category: 'brakes',
-  scheduled_at: '2030-01-15T09:00:00Z' // 2:00 PM in Karachi, inside opening hours
+  scheduled_at: '2030-01-15T19:00:00Z' // 2:00 PM in New York, inside opening hours
 });
 
 const createBooking = (body = validBooking()) => api.post('/api/bookings').send(body);
@@ -80,8 +80,8 @@ describe('POST /api/bookings', () => {
   });
 
   test('emails show the appointment in the shop\'s timezone, not the server\'s', async () => {
-    // 09:00 UTC is 2:00 PM in Karachi (UTC+5); the shop default is Asia/Karachi
-    await createBooking({ ...validBooking(), scheduled_at: '2030-01-15T09:00:00Z' });
+    // 19:00 UTC is 2:00 PM in New York (UTC-5 in January); the server runs in UTC
+    await createBooking({ ...validBooking(), scheduled_at: '2030-01-15T19:00:00Z' });
     await deliverEmails();
     for (const [msg] of sgMail.send.mock.calls) {
       expect(msg.text).toContain('Tuesday, January 15, 2030 at 2:00 PM');
@@ -170,7 +170,7 @@ describe('known bugs (fixed in Phase 1)', () => {
       id: body.booking.id,
       customer_name: 'Jane Doe',
       vehicle_make: 'Toyota',
-      workshop_timezone: 'Asia/Karachi',
+      workshop_timezone: 'America/New_York',
       sentiment: null // a manual booking has no call
     });
   });
@@ -249,14 +249,14 @@ describe('POST /api/bookings: scheduling and data rules', () => {
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SLOT_FULL');
     expect(res.body.alternatives.length).toBeGreaterThan(0);
-    expect(res.body.alternatives.map((a) => a.start)).not.toContain('2030-01-15T09:00:00.000Z');
+    expect(res.body.alternatives.map((a) => a.start)).not.toContain('2030-01-15T19:00:00.000Z');
     expect(res.body.alternatives[0].local).toMatch(/January 15 at 3:00 PM/); // next free hour
   });
 
   test.each([
-    ['after closing time', '2030-01-15T14:00:00Z', 'OUTSIDE_HOURS'], // 7 PM Karachi
-    ['on a closed day', '2030-01-13T06:00:00Z', 'CLOSED'], // Sunday
-    ['in the past', '2020-01-15T09:00:00Z', 'PAST']
+    ['after closing time', '2030-01-16T00:00:00Z', 'OUTSIDE_HOURS'], // 7 PM New York
+    ['on a closed day', '2030-01-13T16:00:00Z', 'CLOSED'], // Sunday
+    ['in the past', '2020-01-15T19:00:00Z', 'PAST']
   ])('a time %s returns 422 with alternatives', async (_, time, code) => {
     const res = await createBooking(at(time));
     expect(res.status).toBe(422);
@@ -288,7 +288,7 @@ describe('POST /api/bookings: scheduling and data rules', () => {
 
   test('the same phone written differently is the same customer', async () => {
     const first = await createBooking({ ...validBooking(), customer_phone: '+1 555 999-8888' });
-    const second = await createBooking({ ...validBooking(), customer_phone: '+15559998888', scheduled_at: '2030-01-16T09:00:00Z' });
+    const second = await createBooking({ ...validBooking(), customer_phone: '+15559998888', scheduled_at: '2030-01-16T19:00:00Z' });
     expect(second.body.booking.customer_id).toBe(first.body.booking.customer_id);
     const { rows } = await pool.query('SELECT phone FROM customers');
     expect(rows).toEqual([{ phone: '+15559998888' }]);
@@ -296,14 +296,14 @@ describe('POST /api/bookings: scheduling and data rules', () => {
 
   test('the same car is reused instead of duplicated', async () => {
     const first = await createBooking();
-    const second = await createBooking({ ...validBooking(), vehicle_make: 'toyota', scheduled_at: '2030-01-16T09:00:00Z' });
+    const second = await createBooking({ ...validBooking(), vehicle_make: 'toyota', scheduled_at: '2030-01-16T19:00:00Z' });
     expect(second.body.booking.vehicle_id).toBe(first.body.booking.vehicle_id);
     expect((await pool.query('SELECT 1 FROM vehicles')).rowCount).toBe(1);
   });
 
   test('a different car for the same customer gets its own record', async () => {
     const first = await createBooking();
-    const second = await createBooking({ ...validBooking(), vehicle_model: 'Civic', vehicle_make: 'Honda', scheduled_at: '2030-01-16T09:00:00Z' });
+    const second = await createBooking({ ...validBooking(), vehicle_model: 'Civic', vehicle_make: 'Honda', scheduled_at: '2030-01-16T19:00:00Z' });
     expect(second.body.booking.vehicle_id).not.toBe(first.body.booking.vehicle_id);
   });
 
@@ -322,31 +322,31 @@ describe('POST /api/bookings: scheduling and data rules', () => {
 
 describe('PUT /api/bookings/:id: moving and re-opening use the same slot rules', () => {
   const put = (id, body) => api.put(`/api/bookings/${id}`).send(body);
-  const other = (phone, at = '2030-01-16T09:00:00Z') =>
+  const other = (phone, at = '2030-01-16T19:00:00Z') =>
     createBooking({ ...validBooking(), customer_phone: phone, scheduled_at: at });
 
   test('moving to a free time works', async () => {
     const { body } = await createBooking();
-    const res = await put(body.booking.id, { scheduled_at: '2030-01-16T09:00:00Z' });
+    const res = await put(body.booking.id, { scheduled_at: '2030-01-16T19:00:00Z' });
     expect(res.status).toBe(200);
-    expect(res.body.booking.scheduled_at).toBe('2030-01-16T09:00:00.000Z');
+    expect(res.body.booking.scheduled_at).toBe('2030-01-16T19:00:00.000Z');
   });
 
   test('moving onto a full time is refused with alternatives, and nothing changes', async () => {
     const { body } = await createBooking();
     await other('+15550001111');
     await other('+15550002222'); // Wednesday 2 PM now full (2 bays)
-    const res = await put(body.booking.id, { scheduled_at: '2030-01-16T09:00:00Z' });
+    const res = await put(body.booking.id, { scheduled_at: '2030-01-16T19:00:00Z' });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SLOT_FULL');
     expect(res.body.alternatives.length).toBeGreaterThan(0);
     const { rows } = await pool.query('SELECT scheduled_at FROM bookings WHERE id = $1', [body.booking.id]);
-    expect(rows[0].scheduled_at.toISOString()).toBe('2030-01-15T09:00:00.000Z');
+    expect(rows[0].scheduled_at.toISOString()).toBe('2030-01-15T19:00:00.000Z');
   });
 
   test('moving to a closed time is refused', async () => {
     const { body } = await createBooking();
-    const res = await put(body.booking.id, { scheduled_at: '2030-01-13T09:00:00Z' }); // Sunday
+    const res = await put(body.booking.id, { scheduled_at: '2030-01-13T19:00:00Z' }); // Sunday
     expect(res.status).toBe(422);
     expect(res.body.code).toBe('CLOSED');
   });
@@ -354,16 +354,16 @@ describe('PUT /api/bookings/:id: moving and re-opening use the same slot rules',
   test('a booking does not block itself when it is re-saved or nudged within its own slot', async () => {
     await pool.query('UPDATE workshops SET bay_count = 1 WHERE id = $1', [workshop.id]);
     const { body } = await createBooking();
-    expect((await put(body.booking.id, { scheduled_at: '2030-01-15T09:00:00Z', urgency: 'urgent' })).status).toBe(200);
+    expect((await put(body.booking.id, { scheduled_at: '2030-01-15T19:00:00Z', urgency: 'urgent' })).status).toBe(200);
     // 2:30 PM: overlaps its own current 2:00-3:00 booking, which must not count as taking the only bay
-    expect((await put(body.booking.id, { scheduled_at: '2030-01-15T09:30:00Z' })).status).toBe(200);
+    expect((await put(body.booking.id, { scheduled_at: '2030-01-15T19:30:00Z' })).status).toBe(200);
   });
 
   test('re-opening a cancelled booking is refused if its time has been taken', async () => {
     await pool.query('UPDATE workshops SET bay_count = 1 WHERE id = $1', [workshop.id]);
     const { body } = await createBooking();
     await api.delete(`/api/bookings/${body.booking.id}`);
-    await other('+15550001111', '2030-01-15T09:00:00Z'); // someone else takes the freed bay
+    await other('+15550001111', '2030-01-15T19:00:00Z'); // someone else takes the freed bay
     const res = await put(body.booking.id, { status: 'confirmed' });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SLOT_FULL');

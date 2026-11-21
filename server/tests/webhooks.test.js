@@ -189,7 +189,7 @@ describe('phone bookings', () => {
     const book = (phone) =>
       request(app).post('/api/bookings').set('x-api-key', process.env.API_KEY).send({
         workshop_id: workshop.id, customer_name: 'Other', customer_phone: phone,
-        issue_summary: 'x', scheduled_at: '2030-01-15T09:00:00Z' // 14:00 Karachi, same as the call
+        issue_summary: 'x', scheduled_at: '2030-01-15T19:00:00Z' // 2:00 PM New York, same as the call
       });
     expect((await book('+15550001111')).status).toBe(201);
     expect((await book('+15550002222')).status).toBe(201);

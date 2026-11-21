@@ -12,12 +12,13 @@ async function createWorkshop(overrides = {}) {
     email: `shop-${Date.now()}-${Math.random().toString(36).slice(2)}@test.local`,
     phone: '+15550000000',
     vapi_phone_number: '+15551112222',
+    timezone: 'America/New_York', // every shop must state its own (US timezones, with DST)
     ...overrides
   };
   const { rows } = await pool.query(
-    `INSERT INTO workshops (name, email, phone, vapi_phone_number)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [w.name, w.email, w.phone, w.vapi_phone_number]
+    `INSERT INTO workshops (name, email, phone, vapi_phone_number, timezone)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [w.name, w.email, w.phone, w.vapi_phone_number, w.timezone]
   );
   return rows[0];
 }
