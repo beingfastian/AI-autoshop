@@ -4,7 +4,7 @@ const { DateTime } = require('luxon');
 const { getAvailableSlots, reserveSlot, SchedulingError } = require('../src/services/scheduling');
 const { pool, resetDb, createWorkshop } = require('./helpers');
 
-const at = (iso, zone = 'Asia/Karachi') => DateTime.fromISO(iso, { zone }).toJSDate();
+const at = (iso, zone = 'America/New_York') => DateTime.fromISO(iso, { zone }).toJSDate();
 const locals = (slots) => slots.map((s) => s.local);
 const quietLogger = { warn: jest.fn() };
 
@@ -44,7 +44,7 @@ describe('getAvailableSlots', () => {
   test('offers every hour of a weekday, in the shop\'s timezone', async () => {
     const result = await slots({ now: at('2030-01-13T12:00'), from: at('2030-01-14T00:00'), days: 1, limit: 50 });
     expect(result).toHaveLength(10);
-    expect(result[0]).toMatchObject({ start: new Date('2030-01-14T03:00:00Z'), local: 'Monday, January 14 at 8:00 AM' });
+    expect(result[0]).toMatchObject({ start: new Date('2030-01-14T13:00:00Z'), local: 'Monday, January 14 at 8:00 AM' });
     expect(result[9].local).toBe('Monday, January 14 at 5:00 PM'); // last one still ends by 6:00 PM closing
   });
 
@@ -150,8 +150,8 @@ describe('reserveSlot', () => {
 
   test('accepts an open time and returns its start and end', async () => {
     expect(await reserve(at('2030-01-14T10:00'))).toEqual({
-      start: new Date('2030-01-14T05:00:00Z'),
-      end: new Date('2030-01-14T06:00:00Z')
+      start: new Date('2030-01-14T15:00:00Z'),
+      end: new Date('2030-01-14T16:00:00Z')
     });
   });
 

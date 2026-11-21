@@ -8,7 +8,7 @@ const { createBooking } = require('../src/services/bookings');
 const { sendDueNotifications, sweepReminders, MAX_ATTEMPTS } = require('../src/services/notifications');
 const { pool, resetDb, createWorkshop } = require('./helpers');
 
-const APPOINTMENT = new Date('2030-01-15T09:00:00Z'); // Tuesday 2:00 PM in Karachi
+const APPOINTMENT = new Date('2030-01-15T19:00:00Z'); // Tuesday 2:00 PM in New York
 const hoursBefore = (h) => new Date(APPOINTMENT.getTime() - h * 3600 * 1000);
 const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
 const send = (options = {}) => sendDueNotifications({ logger, ...options });
@@ -205,11 +205,11 @@ describe('reminders', () => {
     const res = await request(app)
       .put(`/api/bookings/${booking.id}`)
       .set('x-api-key', process.env.API_KEY)
-      .send({ scheduled_at: '2030-01-17T09:00:00Z' }); // Thursday 2 PM
+      .send({ scheduled_at: '2030-01-17T19:00:00Z' }); // Thursday 2 PM
     expect(res.status).toBe(200);
     expect(await reminderRows()).toEqual([]);
 
-    const newDayBefore = new Date('2030-01-16T10:00:00Z');
+    const newDayBefore = new Date('2030-01-16T20:00:00Z');
     expect(await sweepReminders({ now: newDayBefore })).toBe(1);
   });
 });

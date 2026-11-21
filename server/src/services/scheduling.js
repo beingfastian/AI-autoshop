@@ -54,8 +54,9 @@ function hoursForDate(workshop, date, warn = () => {}) {
 }
 
 function zoneFor(workshop) {
-  const zone = workshop.timezone || 'Asia/Karachi';
-  if (!DateTime.now().setZone(zone).isValid) {
+  // Never guess: a wrong zone would shift every slot by hours. The DB requires one per shop.
+  const zone = workshop.timezone;
+  if (!zone || !DateTime.now().setZone(zone).isValid) {
     throw new SchedulingError('INVALID_TIMEZONE', `Workshop ${workshop.id} has an invalid timezone "${zone}"`);
   }
   return zone;
