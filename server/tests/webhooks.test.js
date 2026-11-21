@@ -110,7 +110,7 @@ describe('known bugs (fixed in Phase 1)', () => {
     expect(booking.scheduled_at.toISOString().slice(0, 10)).toBe('2030-01-15');
   });
 
-  test.failing('a retried end-of-call webhook does not create a duplicate booking', async () => {
+  test('a retried end-of-call webhook does not create a duplicate booking', async () => {
     await postCallEnded(endOfCallReport());
     await postCallEnded(endOfCallReport());
     await waitForBooking();
@@ -126,12 +126,13 @@ describe('known bugs (fixed in Phase 1)', () => {
     expect(res.status).toBe(200);
   });
 
-  test.failing('call-started marks the call in-progress (calls.answered_at column is missing)', async () => {
+  test('call-started marks the call in-progress and records when it was answered', async () => {
     await request(app)
       .post('/api/webhooks/vapi/call-started')
       .set('Authorization', AUTH)
       .send({ message: { type: 'status-update', call: { metadata: { call_id: callId } } } });
-    const call = (await pool.query('SELECT status FROM calls WHERE id = $1', [callId])).rows[0];
+    const call = (await pool.query('SELECT status, answered_at FROM calls WHERE id = $1', [callId])).rows[0];
     expect(call.status).toBe('in-progress');
+    expect(call.answered_at).toBeInstanceOf(Date);
   });
 });
