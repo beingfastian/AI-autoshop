@@ -1,3 +1,9 @@
+// SendGrid is mocked: tests must never send real email
+jest.mock('@sendgrid/mail', () => ({
+  setApiKey: jest.fn(),
+  send: jest.fn().mockResolvedValue([{ statusCode: 202 }])
+}));
+
 const request = require('supertest');
 const app = require('../src/app');
 const api = request.agent(app).set('x-api-key', process.env.API_KEY); // /api routes need the key

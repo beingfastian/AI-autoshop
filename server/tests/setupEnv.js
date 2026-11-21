@@ -6,6 +6,5 @@ process.env.NODE_ENV = 'test';
 Object.assign(process.env, testDbEnv()); // same DB the global setup prepared, even if configured via DATABASE_URL
 process.env.VAPI_WEBHOOK_SECRET = 'test-webhook-secret';
 process.env.API_KEY = 'test-api-key-0123456789abcdef0123456789';
-process.env.BOOKING_SERVICE_URL = 'http://127.0.0.1:9'; // unreachable on purpose: notify fails fast
 process.env.SENDGRID_API_KEY = 'SG.test';
 process.env.SENDGRID_FROM_EMAIL = 'noreply@test.local';

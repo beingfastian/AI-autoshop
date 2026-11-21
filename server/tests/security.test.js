@@ -16,8 +16,7 @@ const VALID_ENV = {
   API_KEY: 'k'.repeat(32),
   VAPI_WEBHOOK_SECRET: 's'.repeat(16),
   SENDGRID_API_KEY: 'SG.abc',
-  SENDGRID_FROM_EMAIL: 'noreply@example.com',
-  BOOKING_SERVICE_URL: 'http://localhost:3001'
+  SENDGRID_FROM_EMAIL: 'noreply@example.com'
 };
 
 describe('environment validation', () => {

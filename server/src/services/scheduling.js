@@ -163,6 +163,12 @@ async function getAvailableSlots(db, workshop, options = {}) {
   return slots;
 }
 
+// Serializes bookings for one shop until the caller's transaction ends. Safe to call more than
+// once in the same transaction (Postgres advisory locks stack per session).
+async function lockWorkshopBookings(client, workshopId) {
+  await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [LOCK_NAMESPACE, workshopId]);
+}
+
 /**
  * Claims a time for a new booking. Must run inside the caller's transaction (BEGIN ... COMMIT),
  * and the caller must insert the booking before committing: the lock is released at commit.
@@ -193,8 +199,7 @@ async function reserveSlot(client, workshop, start, options = {}) {
     );
   }
 
-  // Serialize bookings for this shop until the caller's transaction ends
-  await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [LOCK_NAMESPACE, workshop.id]);
+  await lockWorkshopBookings(client, workshop.id);
 
   const busy = await busyRanges(client, workshop.id, startAt, endAt);
   if (peakOverlap(busy, startAt.toMillis(), endAt.toMillis()) >= (workshop.bay_count || 1)) {
@@ -204,4 +209,4 @@ async function reserveSlot(client, workshop, start, options = {}) {
   return { start: startAt.toUTC().toJSDate(), end: endAt.toUTC().toJSDate() };
 }
 
-module.exports = { getAvailableSlots, reserveSlot, SchedulingError };
+module.exports = { getAvailableSlots, reserveSlot, lockWorkshopBookings, SchedulingError };

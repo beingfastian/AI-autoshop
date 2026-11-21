@@ -24,7 +24,7 @@ const validBooking = () => ({
   vehicle_year: 2018,
   issue_summary: 'Grinding noise when braking',
   issue_category: 'brakes',
-  scheduled_at: '2030-01-15T14:00:00Z'
+  scheduled_at: '2030-01-15T09:00:00Z' // 2:00 PM in Karachi, inside opening hours
 });
 
 const createBooking = (body = validBooking()) => api.post('/api/bookings').send(body);
@@ -166,11 +166,23 @@ describe('POST /api/bookings/notify', () => {
 // test starts "unexpectedly passing" and must be switched to a normal test().
 // ---------------------------------------------------------------------------
 describe('known bugs (fixed in Phase 1)', () => {
-  test.failing('GET /:id returns the booking (query selects missing calls.sentiment)', async () => {
+  test('GET /:id returns the booking with customer, vehicle and shop details', async () => {
     const { body } = await createBooking();
     await waitForEmails(body.booking.id);
     const res = await api.get(`/api/bookings/${body.booking.id}`);
     expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: body.booking.id,
+      customer_name: 'Jane Doe',
+      vehicle_make: 'Toyota',
+      workshop_timezone: 'Asia/Karachi',
+      sentiment: null // a manual booking has no call
+    });
+  });
+
+  test('GET /:id returns 404 for a malformed id instead of a 500', async () => {
+    const res = await api.get('/api/bookings/not-a-uuid');
+    expect(res.status).toBe(404);
   });
 
   test('DELETE /:id cancels the booking and records when and why', async () => {
@@ -232,5 +244,86 @@ describe('known bugs (fixed in Phase 1)', () => {
 
   test.failing('reminders job exports sendReminders (file is a copy of routes/bookings.js)', () => {
     expect(typeof require('../src/jobs/reminders').sendReminders).toBe('function');
+  });
+});
+
+describe('POST /api/bookings: scheduling and data rules', () => {
+  const at = (time) => ({ ...validBooking(), scheduled_at: time });
+
+  test('a full time returns 409 with other times the customer can pick', async () => {
+    await createBooking(); // the shop has 2 bays
+    await createBooking({ ...validBooking(), customer_phone: '+15550001111' });
+    const res = await createBooking({ ...validBooking(), customer_phone: '+15550002222' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('SLOT_FULL');
+    expect(res.body.alternatives.length).toBeGreaterThan(0);
+    expect(res.body.alternatives.map((a) => a.start)).not.toContain('2030-01-15T09:00:00.000Z');
+    expect(res.body.alternatives[0].local).toMatch(/January 15 at 3:00 PM/); // next free hour
+  });
+
+  test.each([
+    ['after closing time', '2030-01-15T14:00:00Z', 'OUTSIDE_HOURS'], // 7 PM Karachi
+    ['on a closed day', '2030-01-13T06:00:00Z', 'CLOSED'], // Sunday
+    ['in the past', '2020-01-15T09:00:00Z', 'PAST']
+  ])('a time %s returns 422 with alternatives', async (_, time, code) => {
+    const res = await createBooking(at(time));
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe(code);
+    expect(res.body.alternatives.length).toBeGreaterThan(0);
+    expect(await pool.query('SELECT 1 FROM bookings')).toHaveProperty('rowCount', 0);
+  });
+
+  test('invalid fields are all reported in one 400', async () => {
+    const res = await createBooking({ ...validBooking(), customer_phone: 'call me', scheduled_at: 'soon' });
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual(expect.arrayContaining([
+      expect.stringMatching(/customer_phone/),
+      expect.stringMatching(/scheduled_at/)
+    ]));
+  });
+
+  test('an unknown workshop returns 404', async () => {
+    const res = await createBooking({ ...validBooking(), workshop_id: UNKNOWN_ID });
+    expect(res.status).toBe(404);
+  });
+
+  test('a suspended workshop does not take bookings', async () => {
+    await pool.query("UPDATE workshops SET status = 'suspended' WHERE id = $1", [workshop.id]);
+    const res = await createBooking();
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('WORKSHOP_INACTIVE');
+  });
+
+  test('the same phone written differently is the same customer', async () => {
+    const first = await createBooking({ ...validBooking(), customer_phone: '+1 555 999-8888' });
+    const second = await createBooking({ ...validBooking(), customer_phone: '+15559998888', scheduled_at: '2030-01-16T09:00:00Z' });
+    expect(second.body.booking.customer_id).toBe(first.body.booking.customer_id);
+    const { rows } = await pool.query('SELECT phone FROM customers');
+    expect(rows).toEqual([{ phone: '+15559998888' }]);
+  });
+
+  test('the same car is reused instead of duplicated', async () => {
+    const first = await createBooking();
+    const second = await createBooking({ ...validBooking(), vehicle_make: 'toyota', scheduled_at: '2030-01-16T09:00:00Z' });
+    expect(second.body.booking.vehicle_id).toBe(first.body.booking.vehicle_id);
+    expect((await pool.query('SELECT 1 FROM vehicles')).rowCount).toBe(1);
+  });
+
+  test('a different car for the same customer gets its own record', async () => {
+    const first = await createBooking();
+    const second = await createBooking({ ...validBooking(), vehicle_model: 'Civic', vehicle_make: 'Honda', scheduled_at: '2030-01-16T09:00:00Z' });
+    expect(second.body.booking.vehicle_id).not.toBe(first.body.booking.vehicle_id);
+  });
+
+  test('unexpected category and urgency values fall back to safe defaults', async () => {
+    const res = await createBooking({ ...validBooking(), issue_category: 'Weird Noise', urgency: 'ASAP!!' });
+    expect(res.status).toBe(201);
+    expect(res.body.booking).toMatchObject({ issue_category: 'other', urgency: 'normal' });
+  });
+
+  test('an impossible vehicle year is dropped, not stored', async () => {
+    const res = await createBooking({ ...validBooking(), vehicle_year: 3020 });
+    const { rows } = await pool.query('SELECT year FROM vehicles WHERE id = $1', [res.body.booking.vehicle_id]);
+    expect(rows[0].year).toBeNull();
   });
 });

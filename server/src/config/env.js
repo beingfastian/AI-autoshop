@@ -24,8 +24,6 @@ const schema = z.object({
   SENDGRID_API_KEY: z.string().startsWith('SG.', 'must start with "SG."'),
   SENDGRID_FROM_EMAIL: z.email(),
 
-  // The call-ended webhook notifies bookings over HTTP (this same server)
-  BOOKING_SERVICE_URL: z.url(),
   API_BASE_URL: z.url().optional(),
 
   RATE_LIMIT_WINDOW_MS: numeric.optional(),
