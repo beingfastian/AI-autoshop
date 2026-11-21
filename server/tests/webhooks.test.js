@@ -12,6 +12,7 @@ beforeEach(async () => {
   workshop = await createWorkshop();
   const res = await request(app)
     .post('/api/calls/inbound')
+    .set('x-api-key', process.env.API_KEY)
     .send({ from: '+15559998888', to: workshop.vapi_phone_number, callSid: 'CA-1' });
   callId = res.body.call_id;
 });

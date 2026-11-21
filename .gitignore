@@ -1,10 +1,20 @@
 # Dependencies
 node_modules/
 
-# Environment files (never commit secrets)
+# Environment files and other secrets (never commit secrets; keep them only on your machine)
 .env
 .env.*
+*.env
 !.env.example
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+credentials*.json
+service-account*.json
+*-credentials.json
 
 # Logs and coverage
 *.log
