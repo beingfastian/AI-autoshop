@@ -9,8 +9,8 @@
     "db:migrate:down": "node scripts/migrate.js down",
     "db:seed": "node scripts/seed.js",
     "test:db:prepare": "node scripts/test-db.js",
-    "test": "npm run test:scripts && npm --prefix voice-service test && npm --prefix booking-service test",
-    "install:all": "npm install && npm --prefix voice-service install && npm --prefix booking-service install",
+    "test": "npm run test:scripts && npm --prefix server test",
+    "install:all": "npm install && npm --prefix server install",
     "test:scripts": "jest"
   },
   "engines": {

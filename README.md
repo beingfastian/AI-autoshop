@@ -5,8 +5,10 @@ AI phone receptionist for auto repair shops. Callers talk to a Vapi voice agent;
 ## Repository layout
 
 ```
-voice-service/      Express API: Vapi call handling and webhooks (port 3001)
-booking-service/    Express API: bookings, email notifications, reminder cron (port 3002)
+server/             One package, two processes:
+  src/app.js        Express app: Vapi calls and webhooks, bookings and email notifications
+  src/server.js     API process (port 3001)
+  src/worker.js     Background process: scheduled jobs (hourly reminders)
 database/
   migrations/       SQL migrations, applied in filename order (node-pg-migrate)
   seed.sql          Development seed data (idempotent)
@@ -22,17 +24,16 @@ Architecture/       Architecture diagram (draw.io + SVG)
 ## Setup
 
 ```bash
-npm run install:all                               # root tooling + both services
+npm run install:all                               # root tooling + server
 
-cp voice-service/.env.example voice-service/.env
-cp booking-service/.env.example booking-service/.env
-# fill in DB_* (and API keys) in both files
+cp server/.env.example server/.env
+# fill in DB_* and API keys
 
 npm run db:migrate                                # create / update the schema
 npm run db:seed                                   # optional test workshop + user
 ```
 
-Root scripts read `DB_*` from a root `.env` if present, otherwise from `voice-service/.env`. `DATABASE_URL` takes precedence if set.
+Root scripts read `DB_*` from a root `.env` if present, otherwise from `server/.env`. `DATABASE_URL` takes precedence if set.
 
 **Existing database created from the old `schema.sql`?** Mark the initial migration as applied, then run the rest:
 
@@ -44,11 +45,13 @@ npm run db:migrate
 ## Running
 
 ```bash
-npm --prefix voice-service run dev
-npm --prefix booking-service run dev
+npm --prefix server run dev            # API
+npm --prefix server run dev:worker     # background jobs (separate terminal)
 ```
 
-Health checks: `GET http://localhost:3001/health`, `GET http://localhost:3002/health`.
+In production use `npm --prefix server start` and `npm --prefix server run worker`. Run exactly one worker so scheduled jobs don't fire twice.
+
+Health check: `GET http://localhost:3001/health`.
 
 ## Tests and lint
 
@@ -57,7 +60,7 @@ npm run lint
 npm test
 ```
 
-Tests run against a separate database, `ai_receptionist_test` (override with `TEST_DB_NAME`; the name must end in `_test`). It is dropped and rebuilt from the migrations at the start of every run. Your dev database is never touched. External services are stubbed: SendGrid is mocked and the voice service's call to the booking service points at a closed port.
+Tests run against a separate database, `ai_receptionist_test` (override with `TEST_DB_NAME`; the name must end in `_test`). It is dropped and rebuilt from the migrations at the start of every run. Your dev database is never touched. External services are stubbed: SendGrid is mocked and the call-ended webhook's booking notification points at a closed port.
 
 Tests in a `known bugs` block use `test.failing`: they describe correct behaviour that is broken today and pass only while the bug exists. When a fix lands, Jest reports the test as failing ("unexpectedly passed"); change it to a normal `test()`.
 
@@ -71,4 +74,4 @@ CI (`.github/workflows/ci.yml`) runs lint and tests on every pull request.
 
 ## Environment variables
 
-See `voice-service/.env.example` and `booking-service/.env.example`. `.env` files are git-ignored; never commit real secrets.
+See `server/.env.example`. `.env` files are git-ignored; never commit real secrets.
