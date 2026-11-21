@@ -3,7 +3,7 @@ const { pool } = require('../src/config/database');
 
 async function resetDb() {
   // CASCADE clears every table that references workshops (calls, customers, bookings, ...)
-  await pool.query('TRUNCATE workshops, users RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE workshops, users, webhook_events RESTART IDENTITY CASCADE');
 }
 
 async function createWorkshop(overrides = {}) {

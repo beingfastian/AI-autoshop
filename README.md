@@ -71,6 +71,7 @@ CI (`.github/workflows/ci.yml`) runs lint and tests on every pull request.
 - New migration: add `database/migrations/NNNN_description.sql` with `-- Up Migration` and `-- Down Migration` sections.
 - `npm run db:migrate` applies pending migrations; `npm run db:migrate:down` rolls back the latest one.
 - Never edit a migration that has already been applied anywhere. Add a new one instead.
+- `npm run test:migrations` (part of `npm test` and CI) applies, rolls back and re-applies every migration on a throwaway `_test` database, checks the schema is restored exactly, and checks that data written under the original schema survives.
 
 ## Environment variables
 

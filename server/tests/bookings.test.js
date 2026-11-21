@@ -83,6 +83,15 @@ describe('POST /api/bookings', () => {
     expect(workshopMsg.html).toContain('<div class="detail-row urgent">');
   });
 
+  test('emails show the appointment in the shop\'s timezone, not the server\'s', async () => {
+    // 09:00 UTC is 2:00 PM in Karachi (UTC+5); the shop default is Asia/Karachi
+    const res = await createBooking({ ...validBooking(), scheduled_at: '2030-01-15T09:00:00Z' });
+    await waitForEmails(res.body.booking.id);
+    for (const [msg] of sgMail.send.mock.calls) {
+      expect(msg.text).toContain('Tuesday, January 15, 2030 at 2:00 PM');
+    }
+  });
+
   test('reuses the existing customer for the same phone number', async () => {
     const first = await createBooking();
     const second = await createBooking();
@@ -164,11 +173,61 @@ describe('known bugs (fixed in Phase 1)', () => {
     expect(res.status).toBe(200);
   });
 
-  test.failing('DELETE /:id cancels the booking (bookings.cancelled_at column is missing)', async () => {
+  test('DELETE /:id cancels the booking and records when and why', async () => {
     const { body } = await createBooking();
     await waitForEmails(body.booking.id);
-    const res = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'test' });
+    const res = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'Customer called back' });
     expect(res.status).toBe(200);
+    expect(res.body.booking).toMatchObject({ status: 'cancelled', cancellation_reason: 'Customer called back' });
+    expect(res.body.booking.cancelled_at).not.toBeNull();
+  });
+
+  test('cancelling twice keeps the original cancellation time and reason', async () => {
+    const { body } = await createBooking();
+    await waitForEmails(body.booking.id);
+    const first = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'first' });
+    const second = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'second' });
+    expect(second.status).toBe(200);
+    expect(second.body.booking.cancelled_at).toBe(first.body.booking.cancelled_at);
+    expect(second.body.booking.cancellation_reason).toBe('first');
+  });
+
+  test('PUT can still cancel a booking, and records when', async () => {
+    const { body } = await createBooking();
+    await waitForEmails(body.booking.id);
+    const res = await api.put(`/api/bookings/${body.booking.id}`).send({ status: 'cancelled' });
+    expect(res.status).toBe(200);
+    expect(res.body.booking.status).toBe('cancelled');
+    expect(res.body.booking.cancelled_at).not.toBeNull();
+  });
+
+  test('PUT rejects an unknown status with a clear 400 instead of storing it', async () => {
+    const { body } = await createBooking();
+    await waitForEmails(body.booking.id);
+    const res = await api.put(`/api/bookings/${body.booking.id}`).send({ status: 'done' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/status must be one of/);
+  });
+
+  test('a completed booking cannot be cancelled', async () => {
+    const { body } = await createBooking();
+    await waitForEmails(body.booking.id);
+    await api.put(`/api/bookings/${body.booking.id}`).send({ status: 'completed' });
+    const res = await api.delete(`/api/bookings/${body.booking.id}`);
+    expect(res.status).toBe(409);
+  });
+
+  test('DELETE /:id returns 404 for an unknown booking', async () => {
+    const res = await api.delete(`/api/bookings/${UNKNOWN_ID}`);
+    expect(res.status).toBe(404);
+  });
+
+  test('DELETE /:id works without a reason', async () => {
+    const { body } = await createBooking();
+    await waitForEmails(body.booking.id);
+    const res = await api.delete(`/api/bookings/${body.booking.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.booking).toMatchObject({ status: 'cancelled', cancellation_reason: null });
   });
 
   test.failing('reminders job exports sendReminders (file is a copy of routes/bookings.js)', () => {
