@@ -1,12 +1,12 @@
 // Shared DB connection settings for the root scripts (migrations, seed, test DB).
 // DATABASE_URL wins if set; otherwise the same DB_* variables the services use.
-// Root .env is read first; voice-service/.env is the fallback so local setup doesn't need a third env file.
+// Root .env is read first; server/.env is the fallback so local setup needs only one env file.
 const path = require('path');
 const dotenv = require('dotenv');
 
 const ROOT = path.join(__dirname, '..');
 dotenv.config({ path: path.join(ROOT, '.env'), quiet: true });
-dotenv.config({ path: path.join(ROOT, 'voice-service', '.env'), quiet: true });
+dotenv.config({ path: path.join(ROOT, 'server', '.env'), quiet: true });
 
 const TEST_DB_NAME = process.env.TEST_DB_NAME || 'ai_receptionist_test';
 

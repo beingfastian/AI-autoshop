@@ -1,5 +1,5 @@
 const request = require('supertest');
-const app = require('../src/index');
+const app = require('../src/app');
 const { pool, resetDb, createWorkshop, waitFor, sleep } = require('./helpers');
 
 const AUTH = 'Bearer test-webhook-secret';
