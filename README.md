@@ -74,4 +74,6 @@ CI (`.github/workflows/ci.yml`) runs lint and tests on every pull request.
 
 ## Environment variables
 
-See `server/.env.example`. `.env` files are git-ignored; never commit real secrets.
+See `server/.env.example`. The API and worker check their configuration at startup and exit with a list of anything missing or invalid. Required: `API_KEY`, `VAPI_WEBHOOK_SECRET`, `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL`, `BOOKING_SERVICE_URL`.
+
+`/api/calls` and `/api/bookings` require the `x-api-key` header (an interim measure until real accounts exist). Vapi webhooks authenticate with `VAPI_WEBHOOK_SECRET` instead, and `/health` is public. `.env` files are git-ignored; never commit real secrets.

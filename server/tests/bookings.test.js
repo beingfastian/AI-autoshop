@@ -7,6 +7,7 @@ jest.mock('@sendgrid/mail', () => ({
 const request = require('supertest');
 const sgMail = require('@sendgrid/mail');
 const app = require('../src/app');
+const api = request.agent(app).set('x-api-key', process.env.API_KEY); // /api routes need the key
 const { pool, resetDb, createWorkshop, waitFor } = require('./helpers');
 
 const UNKNOWN_ID = '00000000-0000-0000-0000-000000000000';
@@ -26,7 +27,7 @@ const validBooking = () => ({
   scheduled_at: '2030-01-15T14:00:00Z'
 });
 
-const createBooking = (body = validBooking()) => request(app).post('/api/bookings').send(body);
+const createBooking = (body = validBooking()) => api.post('/api/bookings').send(body);
 
 const emailFlags = async (id) =>
   (await pool.query('SELECT customer_email_sent, workshop_email_sent FROM bookings WHERE id = $1', [id])).rows[0];
@@ -62,6 +63,26 @@ describe('POST /api/bookings', () => {
     expect(recipients).toEqual(expect.arrayContaining(['jane@example.com', workshop.email]));
   });
 
+  test('escapes caller-provided text in email HTML but keeps the plain-text version readable', async () => {
+    const res = await createBooking({
+      ...validBooking(),
+      customer_name: '<script>alert(1)</script> O\'Brien',
+      issue_summary: 'Brakes <img src=x onerror=alert(1)>',
+      urgency: 'urgent'
+    });
+    await waitForEmails(res.body.booking.id);
+
+    for (const [msg] of sgMail.send.mock.calls) {
+      expect(typeof msg.html).toBe('string');
+      expect(msg.html).not.toMatch(/<script|<img/);
+      expect(msg.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt; O&#39;Brien');
+      expect(msg.text).toContain('<script>alert(1)</script> O\'Brien');
+    }
+    // the urgent block is trusted template HTML, so it must still render as markup
+    const workshopMsg = sgMail.send.mock.calls.map(([m]) => m).find((m) => m.to === workshop.email);
+    expect(workshopMsg.html).toContain('<div class="detail-row urgent">');
+  });
+
   test('reuses the existing customer for the same phone number', async () => {
     const first = await createBooking();
     const second = await createBooking();
@@ -81,7 +102,7 @@ describe('GET /api/bookings', () => {
     await waitForEmails(mine.body.booking.id);
     await waitForEmails(theirs.body.booking.id);
 
-    const res = await request(app).get('/api/bookings').query({ workshop_id: workshop.id });
+    const res = await api.get('/api/bookings').query({ workshop_id: workshop.id });
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(1);
     expect(res.body.bookings[0]).toMatchObject({ workshop_id: workshop.id, customer_name: 'Jane Doe', vehicle_make: 'Toyota' });
@@ -98,18 +119,18 @@ describe('PUT /api/bookings/:id', () => {
   });
 
   test('updates allowed fields', async () => {
-    const res = await request(app).put(`/api/bookings/${bookingId}`).send({ status: 'completed', urgency: 'urgent' });
+    const res = await api.put(`/api/bookings/${bookingId}`).send({ status: 'completed', urgency: 'urgent' });
     expect(res.status).toBe(200);
     expect(res.body.booking).toMatchObject({ status: 'completed', urgency: 'urgent' });
   });
 
   test('returns 400 when there is nothing to update', async () => {
-    const res = await request(app).put(`/api/bookings/${bookingId}`).send({});
+    const res = await api.put(`/api/bookings/${bookingId}`).send({});
     expect(res.status).toBe(400);
   });
 
   test('returns 404 for an unknown booking', async () => {
-    const res = await request(app).put(`/api/bookings/${UNKNOWN_ID}`).send({ status: 'completed' });
+    const res = await api.put(`/api/bookings/${UNKNOWN_ID}`).send({ status: 'completed' });
     expect(res.status).toBe(404);
   });
 });
@@ -119,13 +140,13 @@ describe('POST /api/bookings/notify', () => {
     const { body } = await createBooking();
     await waitForEmails(body.booking.id);
 
-    const res = await request(app).post('/api/bookings/notify').send({ bookingId: body.booking.id });
+    const res = await api.post('/api/bookings/notify').send({ bookingId: body.booking.id });
     expect(res.status).toBe(200);
     expect(sgMail.send).toHaveBeenCalledTimes(2); // from creation only, not 4
   });
 
   test('returns 500 for an unknown booking', async () => {
-    const res = await request(app).post('/api/bookings/notify').send({ bookingId: UNKNOWN_ID });
+    const res = await api.post('/api/bookings/notify').send({ bookingId: UNKNOWN_ID });
     expect(res.status).toBe(500);
   });
 });
@@ -139,14 +160,14 @@ describe('known bugs (fixed in Phase 1)', () => {
   test.failing('GET /:id returns the booking (query selects missing calls.sentiment)', async () => {
     const { body } = await createBooking();
     await waitForEmails(body.booking.id);
-    const res = await request(app).get(`/api/bookings/${body.booking.id}`);
+    const res = await api.get(`/api/bookings/${body.booking.id}`);
     expect(res.status).toBe(200);
   });
 
   test.failing('DELETE /:id cancels the booking (bookings.cancelled_at column is missing)', async () => {
     const { body } = await createBooking();
     await waitForEmails(body.booking.id);
-    const res = await request(app).delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'test' });
+    const res = await api.delete(`/api/bookings/${body.booking.id}`).send({ cancellation_reason: 'test' });
     expect(res.status).toBe(200);
   });
 

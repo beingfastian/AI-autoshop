@@ -21,6 +21,13 @@ function startWorker() {
 }
 
 if (require.main === module) {
+  try {
+    require('./config/env').validateEnv();
+  } catch (e) {
+    console.error(`❌ ${e.message}`);
+    process.exit(1);
+  }
+
   const tasks = startWorker();
   console.log('⚙️ Worker started');
 

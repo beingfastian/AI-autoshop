@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { pool } = require('./config/database');
+const { requireApiKey } = require('./middleware/apiKey');
 const callRoutes = require('./routes/calls');
 const webhookRoutes = require('./routes/webhooks');
 const bookingRoutes = require('./routes/bookings');
@@ -42,23 +43,25 @@ app.get('/health', async (req, res) => {
     await pool.query('SELECT 1');
     res.json({ status: 'healthy', service: 'ai-receptionist', timestamp: new Date().toISOString() });
   } catch (e) {
-    res.status(503).json({ status: 'unhealthy', service: 'ai-receptionist', error: e.message });
+    console.error('Health check failed:', e);
+    res.status(503).json({ status: 'unhealthy', service: 'ai-receptionist' });
   }
 });
 
-// Routes
-app.use('/api/calls', callRoutes);
+// Routes. Webhooks authenticate with the Vapi secret instead of the API key.
+app.use('/api/calls', requireApiKey, callRoutes);
 app.use('/api/webhooks', webhookRoutes);
-app.use('/api/bookings', bookingRoutes);
+app.use('/api/bookings', requireApiKey, bookingRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Not Found', path: req.path }));
 
-// Error handler
+// Error handler. Only messages meant for clients (e.g. malformed JSON) are returned; internal errors stay in the log.
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({
+    error: err.expose ? err.message : 'Internal Server Error',
     ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {})
   });
 });
