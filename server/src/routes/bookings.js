@@ -7,6 +7,9 @@ const {
   sendBookingNotificationWorkshop 
 } = require('../config/sendgrid');
 
+// Must match the bookings_status_check constraint (migration 0004)
+const BOOKING_STATUSES = ['pending', 'confirmed', 'completed', 'cancelled', 'no_show'];
+
 /**
  * GET /api/bookings
  * List all bookings with filters
@@ -290,9 +293,14 @@ router.put('/:id', async (req, res) => {
     }
     
     if (status !== undefined) {
+      if (!BOOKING_STATUSES.includes(status)) {
+        return res.status(400).json({ error: `status must be one of: ${BOOKING_STATUSES.join(', ')}` });
+      }
       updates.push(`status = $${paramCount}`);
       params.push(status);
       paramCount++;
+      // The DB requires a cancellation time; keep the first one if it was cancelled before
+      if (status === 'cancelled') updates.push('cancelled_at = COALESCE(cancelled_at, NOW())');
     }
     
     if (issue_summary !== undefined) {
@@ -350,21 +358,34 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { cancellation_reason } = req.body;
-    
+    const reason = typeof req.body?.cancellation_reason === 'string'
+      ? req.body.cancellation_reason.trim().slice(0, 1000) || null
+      : null;
+
+    // Only open bookings can be cancelled; the status check also stops a repeat
+    // request from overwriting the original cancellation time
     const result = await query(
-      `UPDATE bookings 
-       SET status = 'cancelled', 
-           cancelled_at = NOW()
-       WHERE id = $1
+      `UPDATE bookings
+       SET status = 'cancelled',
+           cancelled_at = NOW(),
+           cancellation_reason = $2
+       WHERE id = $1 AND status IN ('pending', 'confirmed')
        RETURNING *`,
-      [id]
+      [id, reason]
     );
-    
+
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Booking not found' });
+      const existing = await query('SELECT * FROM bookings WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      const booking = existing.rows[0];
+      if (booking.status === 'cancelled') {
+        return res.json({ success: true, booking, message: 'Booking was already cancelled' });
+      }
+      return res.status(409).json({ error: `A ${booking.status} booking cannot be cancelled` });
     }
-    
+
     res.json({
       success: true,
       booking: result.rows[0],
@@ -415,7 +436,8 @@ async function sendNotifications(bookingId) {
       w.name as workshop_name,
       w.email as workshop_email,
       w.phone as workshop_phone,
-      w.address as workshop_address
+      w.address as workshop_address,
+      w.timezone as workshop_timezone
     FROM bookings b
     JOIN customers c ON c.id = b.customer_id
     LEFT JOIN vehicles v ON v.id = b.vehicle_id
@@ -423,25 +445,28 @@ async function sendNotifications(bookingId) {
     WHERE b.id = $1`,
     [bookingId]
   );
-  
+
   if (result.rows.length === 0) {
     throw new Error('Booking not found');
   }
-  
+
   const booking = result.rows[0];
-  
-  // Format date and time
+
+  // Format date and time in the shop's timezone, not the server's (servers usually run in UTC)
   const scheduledDate = new Date(booking.scheduled_at);
+  const timeZone = booking.workshop_timezone;
   const formattedDate = scheduledDate.toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
-    day: 'numeric'
+    day: 'numeric',
+    timeZone
   });
   const formattedTime = scheduledDate.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
-    hour12: true
+    hour12: true,
+    timeZone
   });
   
   // Send customer confirmation email

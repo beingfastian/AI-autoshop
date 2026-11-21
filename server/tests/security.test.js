@@ -103,8 +103,8 @@ describe('error responses do not leak internals', () => {
       .set('x-api-key', process.env.API_KEY)
       .send({ from: '+15559998888', to: workshop.vapi_phone_number, callSid: 'CA-1' });
     const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const dbFailure = jest.spyOn(pool, 'query').mockRejectedValueOnce(new Error('relation "calls" is locked by user admin'));
 
-    // call-started currently fails on a missing column (fixed in step 1.4)
     const res = await request(app)
       .post('/api/webhooks/vapi/call-started')
       .set('Authorization', `Bearer ${process.env.VAPI_WEBHOOK_SECRET}`)
@@ -112,6 +112,7 @@ describe('error responses do not leak internals', () => {
 
     expect(error).toHaveBeenCalled(); // the real error is logged...
     expect(res.body).toEqual({ received: true }); // ...but not sent back
+    dbFailure.mockRestore();
     error.mockRestore();
   });
 
