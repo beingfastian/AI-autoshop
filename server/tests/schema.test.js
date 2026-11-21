@@ -97,7 +97,7 @@ describe('bookings', () => {
   test('only one booking per call', async () => {
     const call = await pool.query(
       `INSERT INTO calls (workshop_id, from_number, to_number) VALUES ($1, '+923001112222', $2) RETURNING id`,
-      [workshop.id, workshop.vapi_phone_number]
+      [workshop.id, workshop.ai_phone_number]
     );
     await createBookingRow({ call_id: call.rows[0].id });
     await expect(createBookingRow({ call_id: call.rows[0].id })).rejects.toThrow(/bookings_call_id_unique/);

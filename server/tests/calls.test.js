@@ -1,4 +1,4 @@
-// SendGrid is mocked: tests must never send real email
+// Staff read routes for call history. Live calls are tested in voice.test.js.
 jest.mock('@sendgrid/mail', () => ({
   setApiKey: jest.fn(),
   send: jest.fn().mockResolvedValue([{ statusCode: 202 }])
@@ -10,52 +10,22 @@ const api = request.agent(app).set('x-api-key', process.env.API_KEY); // /api ro
 const { pool, resetDb, createWorkshop } = require('./helpers');
 
 let workshop;
+let callId;
 
 beforeEach(async () => {
   await resetDb();
   workshop = await createWorkshop();
+  const { rows } = await pool.query(
+    `INSERT INTO calls (workshop_id, from_number, to_number, provider_call_id)
+     VALUES ($1, '+15559998888', $2, 'CA-1') RETURNING id`,
+    [workshop.id, workshop.ai_phone_number]
+  );
+  callId = rows[0].id;
 });
 
 afterAll(() => pool.end());
 
-const inbound = (body) => api.post('/api/calls/inbound').send(body);
-
-describe('POST /api/calls/inbound', () => {
-  test('returns 404 when no active workshop owns the number', async () => {
-    const res = await inbound({ from: '+15559998888', to: '+15550009999', callSid: 'CA-unknown' });
-    expect(res.status).toBe(404);
-  });
-
-  test('creates an initiated call record for a known workshop number', async () => {
-    const res = await inbound({ from: '+15559998888', to: workshop.vapi_phone_number, callSid: 'CA-1' });
-
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ success: true, workshop_name: workshop.name, status: 'initiated' });
-
-    const { rows } = await pool.query('SELECT * FROM calls WHERE id = $1', [res.body.call_id]);
-    expect(rows[0]).toMatchObject({
-      workshop_id: workshop.id,
-      from_number: '+15559998888',
-      vapi_call_id: 'CA-1',
-      status: 'initiated'
-    });
-  });
-
-  test('ignores suspended workshops', async () => {
-    await pool.query(`UPDATE workshops SET status = 'suspended' WHERE id = $1`, [workshop.id]);
-    const res = await inbound({ from: '+15559998888', to: workshop.vapi_phone_number, callSid: 'CA-2' });
-    expect(res.status).toBe(404);
-  });
-});
-
 describe('GET /api/calls', () => {
-  let callId;
-
-  beforeEach(async () => {
-    const res = await inbound({ from: '+15559998888', to: workshop.vapi_phone_number, callSid: 'CA-3' });
-    callId = res.body.call_id;
-  });
-
   test('GET /:id returns the call with its workshop name', async () => {
     const res = await api.get(`/api/calls/${callId}`);
     expect(res.status).toBe(200);
@@ -67,10 +37,20 @@ describe('GET /api/calls', () => {
     expect(res.status).toBe(404);
   });
 
+  test('GET /:id returns 404 for a malformed id instead of a 500', async () => {
+    const res = await api.get('/api/calls/not-a-uuid');
+    expect(res.status).toBe(404);
+  });
+
   test('GET /workshop/:workshopId lists calls with a total', async () => {
     const res = await api.get(`/api/calls/workshop/${workshop.id}`);
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(1);
     expect(res.body.calls[0].id).toBe(callId);
+  });
+
+  test('the old simulated /inbound route is gone', async () => {
+    const res = await api.post('/api/calls/inbound').send({ to: workshop.ai_phone_number });
+    expect(res.status).toBe(404);
   });
 });
