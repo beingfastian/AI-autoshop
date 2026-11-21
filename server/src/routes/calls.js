@@ -1,8 +1,13 @@
 // Call Routes - Handle incoming calls and call management
 const express = require('express');
 const router = express.Router();
+const { requireUuidParam } = require('../utils/ids');
+
 const { query } = require('../config/database');
 const axios = require('axios');
+
+router.param('id', requireUuidParam('Call not found'));
+router.param('workshopId', requireUuidParam('Workshop not found'));
 
 // Vapi SDK would be imported here
 // const { VapiClient } = require('@vapi-ai/server-sdk');

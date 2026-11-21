@@ -2,13 +2,15 @@
 const express = require('express');
 const router = express.Router();
 const { query, getClient } = require('../config/database');
-const { 
-  sendBookingConfirmationCustomer, 
-  sendBookingNotificationWorkshop 
-} = require('../config/sendgrid');
+const { createBooking, BookingError, SchedulingError } = require('../services/bookings');
+const { getAvailableSlots } = require('../services/scheduling');
+const { sendNotifications } = require('../services/bookingNotifications');
+const { requireUuidParam } = require('../utils/ids');
 
 // Must match the bookings_status_check constraint (migration 0004)
 const BOOKING_STATUSES = ['pending', 'confirmed', 'completed', 'cancelled', 'no_show'];
+
+router.param('id', requireUuidParam('Booking not found'));
 
 /**
  * GET /api/bookings
@@ -130,14 +132,15 @@ router.get('/:id', async (req, res) => {
         w.email as workshop_email,
         w.phone as workshop_phone,
         w.address as workshop_address,
-        ca.id as call_id,
-        ca.duration_seconds as call_duration,
-        ca.sentiment
+        w.timezone as workshop_timezone,
+        cl.duration_seconds as call_duration,
+        an.sentiment
       FROM bookings b
       JOIN customers c ON c.id = b.customer_id
       LEFT JOIN vehicles v ON v.id = b.vehicle_id
       JOIN workshops w ON w.id = b.workshop_id
-      LEFT JOIN calls ca ON ca.id = b.call_id
+      LEFT JOIN calls cl ON cl.id = b.call_id
+      LEFT JOIN call_analysis an ON an.call_id = b.call_id
       WHERE b.id = $1`,
       [id]
     );
@@ -156,115 +159,75 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/bookings
- * Create new booking manually
+ * Create a booking manually (staff or dashboard). Same rules as phone bookings:
+ * 400 invalid input, 404 unknown workshop, 409 slot full or shop not taking bookings,
+ * 422 time not bookable (past, closed, outside hours, too soon); 409/422 include alternatives.
  */
 router.post('/', async (req, res) => {
+  const body = req.body || {};
+  const input = {
+    workshopId: body.workshop_id,
+    customer: { name: body.customer_name, phone: body.customer_phone, email: body.customer_email },
+    vehicle: { make: body.vehicle_make, model: body.vehicle_model, year: body.vehicle_year },
+    issue: { summary: body.issue_summary, category: body.issue_category, urgency: body.urgency },
+    scheduledAt: body.scheduled_at,
+    durationMinutes: body.duration_minutes
+  };
+
   const client = await getClient();
-  
+  let result;
   try {
-    const {
-      workshop_id,
-      customer_name,
-      customer_phone,
-      customer_email,
-      vehicle_make,
-      vehicle_model,
-      vehicle_year,
-      issue_summary,
-      issue_category,
-      urgency,
-      scheduled_at
-    } = req.body;
-    
-    // Validation
-    if (!workshop_id || !customer_name || !customer_phone || !issue_summary || !scheduled_at) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        required: ['workshop_id', 'customer_name', 'customer_phone', 'issue_summary', 'scheduled_at']
-      });
-    }
-    
     await client.query('BEGIN');
-    
-    // 1. Find or create customer
-    let customerResult = await client.query(
-      `SELECT id FROM customers WHERE workshop_id = $1 AND phone = $2`,
-      [workshop_id, customer_phone]
-    );
-    
-    let customer_id;
-    
-    if (customerResult.rows.length === 0) {
-      const newCustomer = await client.query(
-        `INSERT INTO customers (workshop_id, name, phone, email)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-        [workshop_id, customer_name, customer_phone, customer_email]
-      );
-      customer_id = newCustomer.rows[0].id;
-    } else {
-      customer_id = customerResult.rows[0].id;
-    }
-    
-    // 2. Create vehicle if provided
-    let vehicle_id = null;
-    if (vehicle_make && vehicle_model) {
-      const vehicleResult = await client.query(
-        `INSERT INTO vehicles (customer_id, make, model, year)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-        [customer_id, vehicle_make, vehicle_model, vehicle_year]
-      );
-      vehicle_id = vehicleResult.rows[0].id;
-    }
-    
-    // 3. Create booking
-    const bookingResult = await client.query(
-      `INSERT INTO bookings (
-        workshop_id, customer_id, vehicle_id,
-        scheduled_at, issue_summary, issue_category,
-        urgency, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *`,
-      [
-        workshop_id,
-        customer_id,
-        vehicle_id,
-        scheduled_at,
-        issue_summary,
-        issue_category || 'other',
-        urgency || 'normal',
-        'confirmed'
-      ]
-    );
-    
-    const booking = bookingResult.rows[0];
-    
+    result = await createBooking(client, input);
     await client.query('COMMIT');
-    
-    // Send notifications in background
-    setImmediate(async () => {
-      try {
-        await sendNotifications(booking.id);
-      } catch (error) {
-        console.error('Failed to send notifications:', error);
-      }
-    });
-    
-    res.status(201).json({
-      success: true,
-      booking,
-      message: 'Booking created successfully'
-    });
-    
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error creating booking:', error);
-    res.status(500).json({ error: 'Failed to create booking' });
-  } finally {
+    await client.query('ROLLBACK').catch(() => {});
     client.release();
+    return sendBookingError(res, error, input);
   }
+  client.release();
+
+  // Emails only after the booking is committed
+  setImmediate(() => {
+    sendNotifications(result.booking.id).catch((error) => console.error('Failed to send notifications:', error));
+  });
+
+  res.status(201).json({
+    success: true,
+    booking: result.booking,
+    message: 'Booking created successfully'
+  });
 });
+
+async function sendBookingError(res, error, input) {
+  if (error instanceof BookingError) {
+    if (error.code === 'INVALID_INPUT') {
+      return res.status(400).json({ error: 'Missing or invalid fields', details: error.details });
+    }
+    if (error.code === 'WORKSHOP_NOT_FOUND') return res.status(404).json({ error: error.message });
+    return res.status(409).json({ error: error.message, code: error.code });
+  }
+
+  if (error instanceof SchedulingError) {
+    let alternatives = [];
+    try {
+      const { rows } = await query('SELECT * FROM workshops WHERE id = $1', [input.workshopId]);
+      const requested = new Date(input.scheduledAt);
+      const from = Number.isNaN(requested.getTime()) || requested < new Date() ? undefined : requested;
+      if (rows[0]) alternatives = await getAvailableSlots({ query }, rows[0], { from, limit: 3 });
+    } catch (e) {
+      console.error('Could not load alternative times:', e);
+    }
+    return res.status(error.code === 'SLOT_FULL' ? 409 : 422).json({
+      error: error.message,
+      code: error.code,
+      alternatives: alternatives.map((s) => ({ start: s.start, local: s.local }))
+    });
+  }
+
+  console.error('Error creating booking:', error);
+  return res.status(500).json({ error: 'Failed to create booking' });
+}
 
 /**
  * PUT /api/bookings/:id
@@ -418,115 +381,5 @@ router.post('/notify', async (req, res) => {
     res.status(500).json({ error: 'Failed to send notifications' });
   }
 });
-
-/**
- * Helper: Send notifications for a booking
- */
-async function sendNotifications(bookingId) {
-  // Get booking details
-  const result = await query(
-    `SELECT 
-      b.*,
-      c.name as customer_name,
-      c.phone as customer_phone,
-      c.email as customer_email,
-      v.make as vehicle_make,
-      v.model as vehicle_model,
-      v.year as vehicle_year,
-      w.name as workshop_name,
-      w.email as workshop_email,
-      w.phone as workshop_phone,
-      w.address as workshop_address,
-      w.timezone as workshop_timezone
-    FROM bookings b
-    JOIN customers c ON c.id = b.customer_id
-    LEFT JOIN vehicles v ON v.id = b.vehicle_id
-    JOIN workshops w ON w.id = b.workshop_id
-    WHERE b.id = $1`,
-    [bookingId]
-  );
-
-  if (result.rows.length === 0) {
-    throw new Error('Booking not found');
-  }
-
-  const booking = result.rows[0];
-
-  // Format date and time in the shop's timezone, not the server's (servers usually run in UTC)
-  const scheduledDate = new Date(booking.scheduled_at);
-  const timeZone = booking.workshop_timezone;
-  const formattedDate = scheduledDate.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    timeZone
-  });
-  const formattedTime = scheduledDate.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone
-  });
-  
-  // Send customer confirmation email
-  if (booking.customer_email && !booking.customer_email_sent) {
-    try {
-      await sendBookingConfirmationCustomer({
-        customerEmail: booking.customer_email,
-        customerName: booking.customer_name,
-        workshopName: booking.workshop_name,
-        workshopAddress: booking.workshop_address,
-        workshopPhone: booking.workshop_phone,
-        scheduledDate: formattedDate,
-        scheduledTime: formattedTime,
-        vehicleMake: booking.vehicle_make || 'Your vehicle',
-        vehicleModel: booking.vehicle_model || '',
-        issueSummary: booking.issue_summary,
-        bookingId: booking.id
-      });
-      
-      await query(
-        'UPDATE bookings SET customer_email_sent = true WHERE id = $1',
-        [bookingId]
-      );
-      
-      console.log(`✅ Customer email sent for booking ${bookingId}`);
-    } catch (error) {
-      console.error('Failed to send customer email:', error);
-    }
-  }
-  
-  // Send workshop notification email
-  if (!booking.workshop_email_sent) {
-    try {
-      await sendBookingNotificationWorkshop({
-        workshopEmail: booking.workshop_email,
-        customerName: booking.customer_name,
-        customerPhone: booking.customer_phone,
-        customerEmail: booking.customer_email,
-        scheduledDate: formattedDate,
-        scheduledTime: formattedTime,
-        vehicleMake: booking.vehicle_make || 'Unknown',
-        vehicleModel: booking.vehicle_model || '',
-        vehicleYear: booking.vehicle_year || '',
-        issueSummary: booking.issue_summary,
-        issueCategory: booking.issue_category,
-        urgency: booking.urgency,
-        bookingId: booking.id,
-        dashboardUrl: process.env.ADMIN_DASHBOARD_URL || 'http://localhost:3000'
-      });
-      
-      await query(
-        'UPDATE bookings SET workshop_email_sent = true WHERE id = $1',
-        [bookingId]
-      );
-      
-      console.log(`✅ Workshop email sent for booking ${bookingId}`);
-    } catch (error) {
-      console.error('Failed to send workshop email:', error);
-    }
-  }
-}
 
 module.exports = router;

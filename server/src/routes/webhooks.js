@@ -1,8 +1,10 @@
 // voice-service/src/routes/webhooks.js
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
 const { query, getClient } = require('../config/database');
+const { createBooking, parseRequestedTime, BookingError, SchedulingError } = require('../services/bookings');
+const { sendNotifications } = require('../services/bookingNotifications');
+const { isUuid } = require('../utils/ids');
 
 // -----------------------------
 // Auth: Bearer token from Vapi
@@ -48,8 +50,8 @@ router.post('/vapi/call-started', verifyVapiBearer, async (req, res) => {
     const metadata = pickMetadata(msg);
     const callId = metadata.call_id;
 
-    if (!callId) {
-      return res.status(200).json({ received: true, warning: 'Missing metadata.call_id' });
+    if (!isUuid(callId)) {
+      return res.status(200).json({ received: true, warning: 'Missing or invalid metadata.call_id' });
     }
 
     await query(
@@ -81,21 +83,19 @@ router.post('/vapi/call-ended', verifyVapiBearer, async (req, res) => {
     res.status(200).json({ received: true });
 
     const callId = metadata.call_id;
-    const workshopId = metadata.workshop_id;
 
     const callObj = msg?.call || req.body?.call || {};
     const analysis = msg?.analysis || req.body?.analysis || {};
 
-    if (!callId) {
-      console.warn('⚠️ call-ended: missing metadata.call_id', { eventType });
+    if (!isUuid(callId)) {
+      console.warn('⚠️ call-ended: missing or invalid metadata.call_id', { eventType });
       return;
     }
 
     console.log(`📞 Call ended: ${callId} (event: ${eventType})`);
 
-    await processCallEnded({
+    const result = await processCallEnded({
       callId,
-      workshopId,
       vapiCallId: callObj.id,
       duration: callObj.duration,
       cost: callObj.cost || 0,
@@ -107,6 +107,9 @@ router.post('/vapi/call-ended', verifyVapiBearer, async (req, res) => {
     });
 
     console.log(`✅ call-ended processed in ${Date.now() - start}ms`);
+
+    // Emails only after the booking is committed, and only for a new booking (not a webhook retry)
+    if (result.created) await sendNotifications(result.booking.id);
   } catch (e) {
     console.error('❌ call-ended webhook error:', e);
     // Already responded 200 above in success path; but if error happened before response:
@@ -117,43 +120,53 @@ router.post('/vapi/call-ended', verifyVapiBearer, async (req, res) => {
 // -----------------------------
 // Processing logic
 // -----------------------------
+
+// Saves the call, its analysis and (if the caller confirmed one) the booking in one transaction.
+// A booking that can't be made (unreadable or unavailable time, missing details) never loses the
+// call: the analysis is saved with callback_requested = true so the shop can call the customer back.
 async function processCallEnded(data) {
-  const {
-    callId,
-    workshopId,
-    duration,
-    cost,
-    recording,
-    transcript,
-    structuredData,
-    sentiment
-  } = data;
+  const { callId, duration, cost, endReason, recording, transcript, structuredData, sentiment } = data;
 
   const client = await getClient();
+  let booking = null;
+  let created = false;
 
   try {
     await client.query('BEGIN');
 
-    // 1) Update call
-    await client.query(
+    // The shop comes from our own call record, not from webhook metadata
+    const callRow = await client.query(
       `UPDATE calls SET
         status = 'completed',
         ended_at = NOW(),
         duration_seconds = $1,
         cost_usd = $2,
         recording_url = $3,
-        transcript = $4
-      WHERE id = $5`,
-      [duration || null, cost || 0, recording || null, transcript || null, callId]
+        transcript = $4,
+        ended_reason = $5
+      WHERE id = $6
+      RETURNING workshop_id, from_number`,
+      [
+        Number.isFinite(Number(duration)) ? Math.round(Number(duration)) : null,
+        Number.isFinite(Number(cost)) ? Number(cost) : 0,
+        recording || null,
+        transcript || null,
+        endReason ? String(endReason).slice(0, 100) : null,
+        callId
+      ]
     );
+    if (callRow.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.warn(`⚠️ call-ended for unknown call ${callId}; ignored`);
+      return { booking: null, created: false };
+    }
+    const { workshop_id: workshopId, from_number: callerId } = callRow.rows[0];
 
-    // 2) Save analysis
     await client.query(
       `INSERT INTO call_analysis (
         call_id, structured_data, customer_name, customer_phone,
-        vehicle_make, vehicle_model, issue_keywords, sentiment,
-        booking_created
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        vehicle_make, vehicle_model, issue_keywords, sentiment
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       ON CONFLICT (call_id) DO UPDATE SET
         structured_data = EXCLUDED.structured_data,
         customer_name = EXCLUDED.customer_name,
@@ -161,107 +174,85 @@ async function processCallEnded(data) {
         vehicle_make = EXCLUDED.vehicle_make,
         vehicle_model = EXCLUDED.vehicle_model,
         issue_keywords = EXCLUDED.issue_keywords,
-        sentiment = EXCLUDED.sentiment,
-        booking_created = EXCLUDED.booking_created`,
+        sentiment = EXCLUDED.sentiment`,
       [
         callId,
         JSON.stringify(structuredData || {}),
-        structuredData?.customer_name || null,
-        structuredData?.customer_phone || null,
-        structuredData?.vehicle_make || null,
-        structuredData?.vehicle_model || null,
-        structuredData?.issue_summary || null,
-        sentiment?.label || 'neutral',
-        Boolean(structuredData?.booking_confirmed)
+        trimmed(structuredData?.customer_name, 255),
+        trimmed(structuredData?.customer_phone, 20),
+        trimmed(structuredData?.vehicle_make, 100),
+        trimmed(structuredData?.vehicle_model, 100),
+        trimmed(structuredData?.issue_summary, 5000),
+        trimmed(sentiment?.label || sentiment, 20) || 'neutral'
       ]
     );
 
-    // 3) Create booking if confirmed
-    if (structuredData?.booking_confirmed && structuredData?.customer_name) {
-      await createBookingFromStructuredData({ callId, workshopId, structuredData }, client);
+    let callbackReason = null;
+    if (structuredData?.booking_confirmed) {
+      const outcome = await bookFromCall(client, { callId, workshopId, callerId, structuredData });
+      booking = outcome.booking;
+      created = outcome.created;
+      callbackReason = outcome.callbackReason;
     }
 
+    await client.query(
+      `UPDATE call_analysis SET booking_created = $2, callback_requested = $3 WHERE call_id = $1`,
+      [callId, Boolean(booking), Boolean(callbackReason)]
+    );
     await client.query('COMMIT');
+
+    if (callbackReason) console.warn(`⚠️ Call ${callId} needs a callback: ${callbackReason}`);
+    return { booking, created };
   } catch (e) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     throw e;
   } finally {
     client.release();
   }
 }
 
-async function createBookingFromStructuredData({ callId, workshopId, structuredData }, client) {
-  const customerPhone = structuredData.customer_phone;
-
-  // customer
-  const existingCustomer = await client.query(
-    `SELECT id FROM customers WHERE workshop_id = $1 AND phone = $2`,
-    [workshopId, customerPhone]
-  );
-
-  let customerId;
-  if (existingCustomer.rows.length === 0) {
-    const created = await client.query(
-      `INSERT INTO customers (workshop_id, name, phone, email)
-       VALUES ($1,$2,$3,$4) RETURNING id`,
-      [workshopId, structuredData.customer_name, customerPhone, structuredData.customer_email || null]
-    );
-    customerId = created.rows[0].id;
-  } else {
-    customerId = existingCustomer.rows[0].id;
+// Books the time the caller asked for. Returns { booking } or { callbackReason } - never throws for
+// a booking the caller can't have, so the call itself is always saved.
+async function bookFromCall(client, { callId, workshopId, callerId, structuredData }) {
+  const { rows } = await client.query('SELECT timezone FROM workshops WHERE id = $1', [workshopId]);
+  const scheduledAt = parseRequestedTime(structuredData.preferred_date, structuredData.preferred_time, rows[0]?.timezone);
+  if (!scheduledAt) {
+    return { callbackReason: `requested time not understood (${structuredData.preferred_date} ${structuredData.preferred_time})` };
   }
 
-  // vehicle
-  let vehicleId = null;
-  if (structuredData.vehicle_make && structuredData.vehicle_model) {
-    const v = await client.query(
-      `INSERT INTO vehicles (customer_id, make, model, year)
-       VALUES ($1,$2,$3,$4) RETURNING id`,
-      [customerId, structuredData.vehicle_make, structuredData.vehicle_model, structuredData.vehicle_year || null]
-    );
-    vehicleId = v.rows[0].id;
-  }
-
-  // scheduled_at fallback
-  const scheduledAt = new Date();
-  scheduledAt.setDate(scheduledAt.getDate() + 1);
-  scheduledAt.setHours(10, 0, 0, 0);
-
-  const booking = await client.query(
-    `INSERT INTO bookings (
-      workshop_id, customer_id, vehicle_id, call_id,
-      scheduled_at, issue_summary, issue_category, urgency, status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'confirmed')
-    RETURNING id, scheduled_at`,
-    [
-      workshopId,
-      customerId,
-      vehicleId,
-      callId,
-      scheduledAt,
-      structuredData.issue_summary || 'General service',
-      structuredData.issue_category || 'other',
-      structuredData.urgency || 'normal'
-    ]
-  );
-
-  await client.query(
-    `UPDATE call_analysis SET booking_created = true WHERE call_id = $1`,
-    [callId]
-  );
-
-  // Notify booking service (best effort)
+  // Insurance, not dead code: createBooking() currently runs every check before its first write,
+  // so a refused booking leaves nothing behind. If a check is ever added after a write (customer,
+  // vehicle), this savepoint stops that half-made booking from being committed with the call.
+  await client.query('SAVEPOINT booking');
   try {
-    await axios.post(`${process.env.BOOKING_SERVICE_URL}/api/bookings/notify`, {
-      bookingId: booking.rows[0].id,
+    const result = await createBooking(client, {
       workshopId,
-      customerId,
-      customerEmail: structuredData.customer_email || null,
-      scheduledAt: booking.rows[0].scheduled_at
-    }, { headers: { 'x-api-key': process.env.API_KEY } });
+      callId,
+      customer: {
+        name: structuredData.customer_name,
+        phone: structuredData.customer_phone,
+        fallbackPhone: callerId,
+        email: structuredData.customer_email
+      },
+      vehicle: { make: structuredData.vehicle_make, model: structuredData.vehicle_model, year: structuredData.vehicle_year },
+      issue: { summary: structuredData.issue_summary, category: structuredData.issue_category, urgency: structuredData.urgency },
+      scheduledAt
+    });
+    await client.query('RELEASE SAVEPOINT booking');
+    return { booking: result.booking, created: result.created };
   } catch (e) {
-    console.warn('⚠️ Booking notify failed:', e.message);
+    await client.query('ROLLBACK TO SAVEPOINT booking');
+    if (e instanceof BookingError || e instanceof SchedulingError) {
+      return { callbackReason: `${e.code}: ${e.message}` };
+    }
+    throw e;
   }
+}
+
+function trimmed(value, max) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text ? text.slice(0, max) : null;
 }
 
 module.exports = router;

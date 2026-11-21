@@ -60,7 +60,7 @@ npm run lint
 npm test
 ```
 
-Tests run against a separate database, `ai_receptionist_test` (override with `TEST_DB_NAME`; the name must end in `_test`). It is dropped and rebuilt from the migrations at the start of every run. Your dev database is never touched. External services are stubbed: SendGrid is mocked and the call-ended webhook's booking notification points at a closed port.
+Tests run against a separate database, `ai_receptionist_test` (override with `TEST_DB_NAME`; the name must end in `_test`). It is dropped and rebuilt from the migrations at the start of every run. Your dev database is never touched. External services are stubbed: SendGrid is mocked in every test file that can send email. Tests run with `TZ=UTC`, like a production server.
 
 Tests in a `known bugs` block use `test.failing`: they describe correct behaviour that is broken today and pass only while the bug exists. When a fix lands, Jest reports the test as failing ("unexpectedly passed"); change it to a normal `test()`.
 
@@ -75,6 +75,6 @@ CI (`.github/workflows/ci.yml`) runs lint and tests on every pull request.
 
 ## Environment variables
 
-See `server/.env.example`. The API and worker check their configuration at startup and exit with a list of anything missing or invalid. Required: `API_KEY`, `VAPI_WEBHOOK_SECRET`, `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL`, `BOOKING_SERVICE_URL`.
+See `server/.env.example`. The API and worker check their configuration at startup and exit with a list of anything missing or invalid. Required: `API_KEY`, `VAPI_WEBHOOK_SECRET`, `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL`.
 
 `/api/calls` and `/api/bookings` require the `x-api-key` header (an interim measure until real accounts exist). Vapi webhooks authenticate with `VAPI_WEBHOOK_SECRET` instead, and `/health` is public. `.env` files are git-ignored; never commit real secrets.
