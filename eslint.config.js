@@ -17,6 +17,11 @@ module.exports = [
     }
   },
   {
+    // The voice agent is an ES module package (the LiveKit SDK is ESM-only)
+    files: ['agent/**/*.js'],
+    languageOptions: { sourceType: 'module' }
+  },
+  {
     files: ['**/tests/**/*.js'],
     languageOptions: { globals: globals.jest }
   }

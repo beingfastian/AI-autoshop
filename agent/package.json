@@ -1,0 +1,22 @@
+{
+  "name": "ai-receptionist-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Voice agent (LiveKit) that answers shop calls using the server's /api/voice",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@livekit/agents": "1.9.5",
+    "@livekit/agents-plugin-deepgram": "1.9.5",
+    "@livekit/agents-plugin-openai": "1.9.5",
+    "@livekit/agents-plugin-silero": "1.9.5",
+    "dotenv": "16.4.7"
+  },
+  "scripts": {
+    "start": "node src/agent.js start",
+    "dev": "node src/agent.js dev",
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}
