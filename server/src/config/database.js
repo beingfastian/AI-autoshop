@@ -17,9 +17,10 @@ const pool = new Pool({
 });
 
 pool.on('connect', () => console.log('✅ Database connected successfully'));
+// An idle client lost its connection (e.g. DB restart). pg drops that client and the
+// pool opens a new one on the next query, so log it instead of killing the process.
 pool.on('error', (err) => {
-  console.error('❌ Unexpected database error:', err);
-  process.exit(1);
+  console.error('❌ Unexpected database error on an idle client:', err.message);
 });
 
 const query = async (text, params) => {

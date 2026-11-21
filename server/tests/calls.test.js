@@ -1,5 +1,6 @@
 const request = require('supertest');
 const app = require('../src/app');
+const api = request.agent(app).set('x-api-key', process.env.API_KEY); // /api routes need the key
 const { pool, resetDb, createWorkshop } = require('./helpers');
 
 let workshop;
@@ -11,7 +12,7 @@ beforeEach(async () => {
 
 afterAll(() => pool.end());
 
-const inbound = (body) => request(app).post('/api/calls/inbound').send(body);
+const inbound = (body) => api.post('/api/calls/inbound').send(body);
 
 describe('POST /api/calls/inbound', () => {
   test('returns 404 when no active workshop owns the number', async () => {
@@ -50,18 +51,18 @@ describe('GET /api/calls', () => {
   });
 
   test('GET /:id returns the call with its workshop name', async () => {
-    const res = await request(app).get(`/api/calls/${callId}`);
+    const res = await api.get(`/api/calls/${callId}`);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: callId, workshop_name: workshop.name });
   });
 
   test('GET /:id returns 404 for an unknown call', async () => {
-    const res = await request(app).get('/api/calls/00000000-0000-0000-0000-000000000000');
+    const res = await api.get('/api/calls/00000000-0000-0000-0000-000000000000');
     expect(res.status).toBe(404);
   });
 
   test('GET /workshop/:workshopId lists calls with a total', async () => {
-    const res = await request(app).get(`/api/calls/workshop/${workshop.id}`);
+    const res = await api.get(`/api/calls/workshop/${workshop.id}`);
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(1);
     expect(res.body.calls[0].id).toBe(callId);

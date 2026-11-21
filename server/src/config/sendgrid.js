@@ -1,5 +1,6 @@
 // SendGrid email configuration
 const sgMail = require('@sendgrid/mail');
+const { safeHtml } = require('../utils/safeHtml');
 require('dotenv').config();
 
 // Initialize SendGrid with API key
@@ -30,8 +31,8 @@ async function sendEmail(emailData) {
     },
     subject,
     text,
-    html,
-    
+    html: html === undefined ? undefined : String(html), // safeHtml templates are objects
+
     // If using SendGrid dynamic templates
     ...(templateId && {
       templateId,
@@ -84,7 +85,7 @@ async function sendBookingConfirmationCustomer(bookingData) {
   
   const subject = `Appointment Confirmed - ${workshopName}`;
   
-  const html = `
+  const html = safeHtml`
     <!DOCTYPE html>
     <html>
     <head>
@@ -205,7 +206,7 @@ async function sendBookingNotificationWorkshop(bookingData) {
   const urgencyColor = urgency === 'urgent' ? '#f44336' : '#4CAF50';
   const subject = `${urgency === 'urgent' ? '🚨 URGENT - ' : ''}New Booking: ${customerName} - ${scheduledDate}`;
   
-  const html = `
+  const html = safeHtml`
     <!DOCTYPE html>
     <html>
     <head>
@@ -267,7 +268,7 @@ async function sendBookingNotificationWorkshop(bookingData) {
             <span class="label">📋 Category:</span> ${issueCategory}
           </div>
           
-          ${urgency === 'urgent' ? `
+          ${urgency === 'urgent' ? safeHtml`
           <div class="detail-row urgent">
             <span class="label">⚠️ Priority:</span> <strong>URGENT - ${issueSummary.includes('brake') ? 'Safety Issue' : 'Immediate Attention Required'}</strong>
           </div>
@@ -342,7 +343,7 @@ async function sendBookingReminder(bookingData) {
   
   const subject = `Reminder: Your appointment ${hoursUntil === 24 ? 'tomorrow' : 'in 2 hours'} at ${workshopName}`;
   
-  const html = `
+  const html = safeHtml`
     <!DOCTYPE html>
     <html>
     <head>

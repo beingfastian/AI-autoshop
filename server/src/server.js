@@ -1,4 +1,14 @@
-// server/src/server.js - API process: starts the HTTP server
+// server/src/server.js - API process: validates config, then starts the HTTP server
+require('dotenv').config();
+const { validateEnv } = require('./config/env');
+
+try {
+  validateEnv();
+} catch (e) {
+  console.error(`❌ ${e.message}`);
+  process.exit(1);
+}
+
 const app = require('./app');
 const { pool } = require('./config/database');
 
