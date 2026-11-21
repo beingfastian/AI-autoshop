@@ -2,9 +2,9 @@
 const express = require('express');
 const router = express.Router();
 const { query, getClient } = require('../config/database');
-const { createBooking, BookingError, SchedulingError } = require('../services/bookings');
-const { getAvailableSlots } = require('../services/scheduling');
-const { sendNotifications } = require('../services/bookingNotifications');
+const { createBooking, BookingError, SchedulingError, ISSUE_CATEGORIES, URGENCIES } = require('../services/bookings');
+const { getAvailableSlots, reserveSlot, ACTIVE_STATUSES } = require('../services/scheduling');
+const { resetReminders } = require('../services/notifications');
 const { requireUuidParam } = require('../utils/ids');
 
 // Must match the bookings_status_check constraint (migration 0004)
@@ -187,10 +187,7 @@ router.post('/', async (req, res) => {
   }
   client.release();
 
-  // Emails only after the booking is committed
-  setImmediate(() => {
-    sendNotifications(result.booking.id).catch((error) => console.error('Failed to send notifications:', error));
-  });
+  // Confirmation messages were queued in the booking's transaction; the worker sends them
 
   res.status(201).json({
     success: true,
@@ -231,86 +228,79 @@ async function sendBookingError(res, error, input) {
 
 /**
  * PUT /api/bookings/:id
- * Update booking
+ * Update a booking. Moving it, or re-opening a cancelled one, goes through the same slot checks
+ * as a new booking (hours, holidays, capacity) and resets its reminders for the new time.
  */
 router.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const { scheduled_at, status, issue_summary, issue_category, urgency } = req.body || {};
+
+  const problems = [];
+  if (scheduled_at !== undefined && Number.isNaN(new Date(scheduled_at).getTime())) problems.push('scheduled_at must be a valid date and time');
+  if (status !== undefined && !BOOKING_STATUSES.includes(status)) problems.push(`status must be one of: ${BOOKING_STATUSES.join(', ')}`);
+  if (issue_summary !== undefined && (typeof issue_summary !== 'string' || !issue_summary.trim())) problems.push('issue_summary must not be empty');
+  if (issue_category !== undefined && !ISSUE_CATEGORIES.includes(issue_category)) problems.push(`issue_category must be one of: ${ISSUE_CATEGORIES.join(', ')}`);
+  if (urgency !== undefined && !URGENCIES.includes(urgency)) problems.push(`urgency must be one of: ${URGENCIES.join(', ')}`);
+  if (problems.length) {
+    return res.status(400).json({ error: problems.length === 1 ? problems[0] : 'Invalid fields', details: problems });
+  }
+  if ([scheduled_at, status, issue_summary, issue_category, urgency].every((v) => v === undefined)) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+
+  const client = await getClient();
+  let workshopId = null;
   try {
-    const { id } = req.params;
-    const {
-      scheduled_at,
-      status,
-      issue_summary,
-      issue_category,
-      urgency
-    } = req.body;
-    
-    // Build update query dynamically
-    const updates = [];
-    const params = [];
-    let paramCount = 1;
-    
-    if (scheduled_at !== undefined) {
-      updates.push(`scheduled_at = $${paramCount}`);
-      params.push(scheduled_at);
-      paramCount++;
-    }
-    
-    if (status !== undefined) {
-      if (!BOOKING_STATUSES.includes(status)) {
-        return res.status(400).json({ error: `status must be one of: ${BOOKING_STATUSES.join(', ')}` });
-      }
-      updates.push(`status = $${paramCount}`);
-      params.push(status);
-      paramCount++;
-      // The DB requires a cancellation time; keep the first one if it was cancelled before
-      if (status === 'cancelled') updates.push('cancelled_at = COALESCE(cancelled_at, NOW())');
-    }
-    
-    if (issue_summary !== undefined) {
-      updates.push(`issue_summary = $${paramCount}`);
-      params.push(issue_summary);
-      paramCount++;
-    }
-    
-    if (issue_category !== undefined) {
-      updates.push(`issue_category = $${paramCount}`);
-      params.push(issue_category);
-      paramCount++;
-    }
-    
-    if (urgency !== undefined) {
-      updates.push(`urgency = $${paramCount}`);
-      params.push(urgency);
-      paramCount++;
-    }
-    
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
-    }
-    
-    params.push(id);
-    
-    const result = await query(
-      `UPDATE bookings 
-       SET ${updates.join(', ')}, updated_at = NOW()
-       WHERE id = $${paramCount}
-       RETURNING *`,
-      params
-    );
-    
-    if (result.rows.length === 0) {
+    await client.query('BEGIN');
+    const current = (await client.query('SELECT * FROM bookings WHERE id = $1 FOR UPDATE', [id])).rows[0];
+    if (!current) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Booking not found' });
     }
-    
-    res.json({
-      success: true,
-      booking: result.rows[0],
-      message: 'Booking updated successfully'
-    });
-    
+    workshopId = current.workshop_id;
+
+    const newStatus = status ?? current.status;
+    const newTime = scheduled_at !== undefined ? new Date(scheduled_at) : current.scheduled_at;
+    const timeChanged = newTime.getTime() !== new Date(current.scheduled_at).getTime();
+    const willBeActive = ACTIVE_STATUSES.includes(newStatus);
+    const reopening = willBeActive && !ACTIVE_STATUSES.includes(current.status);
+
+    if (willBeActive && (timeChanged || reopening)) {
+      const workshop = (await client.query('SELECT * FROM workshops WHERE id = $1', [current.workshop_id])).rows[0];
+      await reserveSlot(client, workshop, newTime, {
+        durationMinutes: current.duration_minutes ?? undefined,
+        excludeBookingId: current.id
+      });
+    }
+
+    const { rows } = await client.query(
+      `UPDATE bookings SET
+         scheduled_at = $2,
+         status = $3::varchar,
+         issue_summary = COALESCE($4, issue_summary),
+         issue_category = COALESCE($5, issue_category),
+         urgency = COALESCE($6, urgency),
+         -- the DB requires a cancellation time; keep the first one, clear it when re-opened
+         cancelled_at = CASE WHEN $3::varchar = 'cancelled' THEN COALESCE(cancelled_at, NOW()) ELSE NULL END,
+         cancellation_reason = CASE WHEN $3::varchar = 'cancelled' THEN cancellation_reason ELSE NULL END,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, newTime, newStatus, issue_summary?.trim() ?? null, issue_category ?? null, urgency ?? null]
+    );
+    if (timeChanged) await resetReminders(client, id);
+
+    await client.query('COMMIT');
+    res.json({ success: true, booking: rows[0], message: 'Booking updated successfully' });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error instanceof SchedulingError) {
+      return sendBookingError(res, error, { workshopId, scheduledAt: scheduled_at });
+    }
     console.error('Error updating booking:', error);
     res.status(500).json({ error: 'Failed to update booking' });
+  } finally {
+    client.release();
   }
 });
 
@@ -358,27 +348,6 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error cancelling booking:', error);
     res.status(500).json({ error: 'Failed to cancel booking' });
-  }
-});
-
-/**
- * POST /api/bookings/notify
- * Send notification emails for a booking
- */
-router.post('/notify', async (req, res) => {
-  try {
-    const { bookingId } = req.body;
-    
-    await sendNotifications(bookingId);
-    
-    res.json({
-      success: true,
-      message: 'Notifications sent successfully'
-    });
-    
-  } catch (error) {
-    console.error('Error sending notifications:', error);
-    res.status(500).json({ error: 'Failed to send notifications' });
   }
 });
 

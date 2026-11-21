@@ -3,7 +3,6 @@ const express = require('express');
 const router = express.Router();
 const { query, getClient } = require('../config/database');
 const { createBooking, parseRequestedTime, BookingError, SchedulingError } = require('../services/bookings');
-const { sendNotifications } = require('../services/bookingNotifications');
 const { isUuid } = require('../utils/ids');
 
 // -----------------------------
@@ -107,9 +106,7 @@ router.post('/vapi/call-ended', verifyVapiBearer, async (req, res) => {
     });
 
     console.log(`✅ call-ended processed in ${Date.now() - start}ms`);
-
-    // Emails only after the booking is committed, and only for a new booking (not a webhook retry)
-    if (result.created) await sendNotifications(result.booking.id);
+    if (result.created) console.log(`📅 Booking ${result.booking.id} created from call ${callId}`);
   } catch (e) {
     console.error('❌ call-ended webhook error:', e);
     // Already responded 200 above in success path; but if error happened before response:

@@ -7,9 +7,10 @@
 //   3. finds or creates the customer by phone (caller ID when the AI didn't capture one)
 //   4. reuses the customer's vehicle when it's the same car
 //   5. reserves the slot (scheduling rules, capacity) and inserts the booking
-// Sending emails is the caller's job, after COMMIT, so nothing is sent for a rolled-back booking.
+//   6. queues the confirmation messages in the same transaction: a rolled-back booking sends nothing
 const { DateTime } = require('luxon');
 const { reserveSlot, lockWorkshopBookings, SchedulingError } = require('./scheduling');
+const { queueBookingNotifications } = require('./notifications');
 
 const ISSUE_CATEGORIES = ['brakes', 'engine', 'transmission', 'electrical', 'tires', 'other'];
 const URGENCIES = ['urgent', 'normal', 'low'];
@@ -199,6 +200,7 @@ async function createBooking(client, input, { now } = {}) {
       data.issue.summary, data.issue.category, data.issue.urgency
     ]
   );
+  await queueBookingNotifications(client, rows[0].id);
   return { booking: rows[0], created: true };
 }
 

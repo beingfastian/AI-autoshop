@@ -87,16 +87,18 @@ async function closedDates(db, workshopId, firstDate, lastDate) {
   return closed;
 }
 
-// Active bookings overlapping [from, to) as { start, end } millisecond ranges
-async function busyRanges(db, workshopId, from, to) {
+// Active bookings overlapping [from, to) as { start, end } millisecond ranges.
+// excludeBookingId leaves one booking out (the one being moved, so it doesn't block itself).
+async function busyRanges(db, workshopId, from, to, excludeBookingId = null) {
   const { rows } = await db.query(
     `SELECT scheduled_at, COALESCE(duration_minutes, 60) AS duration_minutes
        FROM bookings
       WHERE workshop_id = $1
         AND status = ANY($4)
         AND scheduled_at < $3
-        AND scheduled_at + make_interval(mins => COALESCE(duration_minutes, 60)) > $2`,
-    [workshopId, from.toJSDate(), to.toJSDate(), ACTIVE_STATUSES]
+        AND scheduled_at + make_interval(mins => COALESCE(duration_minutes, 60)) > $2
+        AND ($5::uuid IS NULL OR id <> $5::uuid)`,
+    [workshopId, from.toJSDate(), to.toJSDate(), ACTIVE_STATUSES, excludeBookingId]
   );
   return rows.map((r) => {
     const start = new Date(r.scheduled_at).getTime();
@@ -172,6 +174,7 @@ async function lockWorkshopBookings(client, workshopId) {
 /**
  * Claims a time for a new booking. Must run inside the caller's transaction (BEGIN ... COMMIT),
  * and the caller must insert the booking before committing: the lock is released at commit.
+ * options: { durationMinutes, now, excludeBookingId (when moving an existing booking) }
  * Throws SchedulingError with code PAST, TOO_SOON, CLOSED, OUTSIDE_HOURS, SLOT_FULL or INVALID_TIME.
  * @returns { start: Date, end: Date }
  */
@@ -201,7 +204,7 @@ async function reserveSlot(client, workshop, start, options = {}) {
 
   await lockWorkshopBookings(client, workshop.id);
 
-  const busy = await busyRanges(client, workshop.id, startAt, endAt);
+  const busy = await busyRanges(client, workshop.id, startAt, endAt, options.excludeBookingId || null);
   if (peakOverlap(busy, startAt.toMillis(), endAt.toMillis()) >= (workshop.bay_count || 1)) {
     throw new SchedulingError('SLOT_FULL', 'That time is fully booked');
   }
@@ -209,4 +212,4 @@ async function reserveSlot(client, workshop, start, options = {}) {
   return { start: startAt.toUTC().toJSDate(), end: endAt.toUTC().toJSDate() };
 }
 
-module.exports = { getAvailableSlots, reserveSlot, lockWorkshopBookings, SchedulingError };
+module.exports = { getAvailableSlots, reserveSlot, lockWorkshopBookings, SchedulingError, ACTIVE_STATUSES };
