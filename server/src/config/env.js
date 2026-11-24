@@ -26,6 +26,14 @@ const schema = z.object({
 
   API_BASE_URL: z.url().optional(),
 
+  // Optional: one connection string (e.g. Neon) instead of DB_*; smaller pools on serverless
+  DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must start with postgres:// or postgresql://').optional(),
+  DB_POOL_MAX: numeric.optional(),
+
+  // Optional: protects GET/POST /api/jobs/tick (background jobs on hosts without a worker)
+  CRON_SECRET: z.string().min(32, 'must be at least 32 characters (e.g. `openssl rand -hex 32`)').optional(),
+  TRUST_PROXY: z.string().regex(/^(true|false|\d+)$/, 'must be true, false or a number of proxy hops').optional(),
+
   RATE_LIMIT_WINDOW_MS: numeric.optional(),
   RATE_LIMIT_MAX_REQUESTS: numeric.optional(),
 

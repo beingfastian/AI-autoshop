@@ -14,9 +14,15 @@ const callRoutes = require('./routes/calls');
 const voiceRoutes = require('./routes/voice');
 const authRoutes = require('./routes/auth');
 const workshopRoutes = require('./routes/workshop');
+const jobRoutes = require('./routes/jobs');
 const bookingRoutes = require('./routes/bookings');
 
 const app = express();
+
+// Behind a proxy (Vercel, a load balancer) the client IP is in X-Forwarded-For. Trusting it is
+// needed for per-IP limits to see real clients instead of the proxy. TRUST_PROXY overrides.
+const trustProxy = process.env.TRUST_PROXY ?? (process.env.VERCEL ? 'true' : 'false');
+app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy === 'true');
 
 // Security headers
 app.use(helmet());
@@ -67,6 +73,7 @@ app.use('/api/calls', requireStaff, callRoutes);
 app.use('/api/bookings', requireStaff, bookingRoutes);
 app.use('/api/workshop', requireStaff, workshopRoutes);
 app.use('/api/voice', requireVoiceAgentKey, voiceRoutes);
+app.use('/api/jobs', jobRoutes); // its own CRON_SECRET check
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Not Found', path: req.path }));

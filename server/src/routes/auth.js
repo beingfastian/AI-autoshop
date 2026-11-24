@@ -10,9 +10,11 @@ const { requireStaff, sessionToken, setSessionCookie, clearSessionCookie } = req
 
 const router = express.Router();
 
-// Per-IP limit on top of the per-account lock. In-memory, so per server instance; the account
-// lock (in the DB) is what holds across instances.
+// Attempts per IP + email, on top of the per-account lock. Keyed with the email too because many
+// visitors can share one IP behind proxies and office networks: one person's typos must not lock
+// everyone else out. In-memory (per instance); the account lock in the DB holds everywhere.
 const loginLimiter = rateLimit({
+  keyGenerator: (req) => `${req.ip || 'unknown'}|${String(req.body?.email || '').trim().toLowerCase()}`,
   windowMs: 15 * 60 * 1000,
   max: Number(process.env.LOGIN_RATE_LIMIT || 30),
   standardHeaders: true,
