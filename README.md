@@ -1,4 +1,6 @@
-# AI Autoshop Receptionist
+# Wrenchline
+
+**AI receptionist for auto repair shops.**
 
 AI phone receptionist for auto repair shops. Callers talk to a voice agent; call results are stored in Postgres, turned into bookings, and confirmed by email.
 
