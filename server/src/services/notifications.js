@@ -314,7 +314,9 @@ async function sendDueNotifications({ now = new Date(), limit = 20, logger = con
       const booking = notification.call_id
         ? await loadCallDetails(client, notification.call_id)
         : await loadBookingDetails(client, notification.booking_id);
-      const skip = reasonToSkip(notification, booking, now);
+      // EMAIL_DELIVERY=off (demo/staging): record what would have been sent, but don't send it
+      const emailOff = notification.channel === 'email' && process.env.EMAIL_DELIVERY === 'off';
+      const skip = emailOff ? 'email delivery is turned off' : reasonToSkip(notification, booking, now);
       if (skip) {
         await client.query(
           `UPDATE notifications SET status = 'skipped', last_error = $2 WHERE id = $1`,

@@ -118,3 +118,34 @@ describe('configuration for hosting', () => {
     expect(result.stderr).toMatch(/Invalid environment configuration[\s\S]*API_KEY is missing/);
   });
 });
+
+describe('EMAIL_DELIVERY=off (demo and staging)', () => {
+  const VALID = { API_KEY: 'k'.repeat(32), VOICE_AGENT_KEY: 'v'.repeat(32) };
+
+  test('SendGrid settings are required unless delivery is off', () => {
+    expect(() => validateEnv(VALID)).toThrow(/SENDGRID_API_KEY is missing \(or set EMAIL_DELIVERY=off\)/);
+    expect(() => validateEnv({ ...VALID, EMAIL_DELIVERY: 'off' })).not.toThrow();
+  });
+
+  test('messages are recorded as skipped and never sent', async () => {
+    const saved = process.env.EMAIL_DELIVERY;
+    process.env.EMAIL_DELIVERY = 'off';
+    try {
+      await resetDb();
+      sgMail.send.mockClear();
+      const shop = await createWorkshop();
+      await request(app).post('/api/bookings').set('x-api-key', process.env.API_KEY).send({
+        workshop_id: shop.id, customer_name: 'Jane', customer_phone: '+15559998888', customer_email: 'jane@example.com',
+        issue_summary: 'Brakes', scheduled_at: '2030-01-15T19:00:00Z'
+      });
+      const { sendDueNotifications } = require('../src/services/notifications');
+      expect(await sendDueNotifications({ logger: { log() {}, warn() {}, error() {} } })).toMatchObject({ sent: 0, skipped: 2 });
+      expect(sgMail.send).not.toHaveBeenCalled();
+      const { rows } = await pool.query('SELECT DISTINCT status, last_error FROM notifications');
+      expect(rows).toEqual([{ status: 'skipped', last_error: 'email delivery is turned off' }]);
+    } finally {
+      if (saved === undefined) delete process.env.EMAIL_DELIVERY;
+      else process.env.EMAIL_DELIVERY = saved;
+    }
+  });
+});
