@@ -21,8 +21,10 @@ const schema = z.object({
   VOICE_AGENT_KEY: z.string().min(32, 'must be at least 32 characters (e.g. `openssl rand -hex 32`)'),
 
   // Email
-  SENDGRID_API_KEY: z.string().startsWith('SG.', 'must start with "SG."'),
-  SENDGRID_FROM_EMAIL: z.email(),
+  // Required unless EMAIL_DELIVERY=off (demo/staging: messages are recorded but not sent)
+  EMAIL_DELIVERY: z.enum(['on', 'off']).optional(),
+  SENDGRID_API_KEY: z.string().startsWith('SG.', 'must start with "SG."').optional(),
+  SENDGRID_FROM_EMAIL: z.email().optional(),
 
   API_BASE_URL: z.url().optional(),
 
@@ -62,13 +64,20 @@ function validateEnv(env = process.env) {
   // Treat empty strings (e.g. `KEY=` copied from .env.example) as missing
   const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ''));
   const result = schema.safeParse(cleaned);
-  if (result.success) return result.data;
 
-  const problems = result.error.issues.map((issue) => {
+  const problems = result.success ? [] : result.error.issues.map((issue) => {
     const name = issue.path.join('.');
     const message = issue.code !== 'custom' && cleaned[name] === undefined ? 'is missing' : issue.message;
     return `  - ${name} ${message}`;
   });
+  // Email settings are required unless delivery is switched off (checked here so they're listed
+  // together with every other problem, not only after the rest is fixed)
+  if (cleaned.EMAIL_DELIVERY !== 'off') {
+    for (const key of ['SENDGRID_API_KEY', 'SENDGRID_FROM_EMAIL']) {
+      if (cleaned[key] === undefined) problems.push(`  - ${key} is missing (or set EMAIL_DELIVERY=off)`);
+    }
+  }
+  if (!problems.length) return result.data;
   throw new Error(`Invalid environment configuration:\n${problems.join('\n')}\nSee server/.env.example.`);
 }
 
