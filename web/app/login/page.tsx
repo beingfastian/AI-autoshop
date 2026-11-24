@@ -2,7 +2,20 @@
 
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowRight, CalendarCheck, CircleAlert, Clock, Mail, PhoneIncoming } from 'lucide-react';
+import { Logo } from '@/components/Logo';
+import { Button } from '@/components/ui';
 import { api, ApiError, type User } from '@/lib/api';
+import { BRAND_TAGLINE } from '@/lib/brand';
+
+const FEATURES = [
+  { icon: PhoneIncoming, title: 'Answers every call', text: 'Day, night and weekends. No more missed customers or voicemail.' },
+  { icon: CalendarCheck, title: 'Books real appointments', text: 'Checks your hours, holidays and free bays before offering a time.' },
+  { icon: Mail, title: 'Keeps everyone in the loop', text: 'Confirmations and reminders for customers, alerts for your team.' }
+];
+
+const field =
+  'mt-2 block h-12 w-full rounded-xl border border-line bg-white px-4 text-[15px] text-ink shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100';
 
 function LoginForm() {
   const router = useRouter();
@@ -24,53 +37,84 @@ function LoginForm() {
       await api<{ user: User }>('/auth/login', { method: 'POST', json: { email, password } });
       router.replace(destination);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach the server. Try again.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach the server. Check your connection and try again.');
       setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4" noValidate>
+    <form onSubmit={onSubmit} className="space-y-5" noValidate>
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
-        <input
-          id="email" type="email" autoComplete="email" required value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
+        <label htmlFor="email" className="text-sm font-semibold text-ink">Work email</label>
+        <input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@yourshop.com" className={field} />
       </div>
       <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700">Password</label>
-        <input
-          id="password" type="password" autoComplete="current-password" required value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
+        <label htmlFor="password" className="text-sm font-semibold text-ink">Password</label>
+        <input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className={field} />
       </div>
-      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button
-        type="submit" disabled={busy || !email || !password}
-        className="w-full rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {busy ? 'Signing in…' : 'Sign in'}
-      </button>
+      {error && (
+        <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <CircleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      )}
+      <Button type="submit" loading={busy} disabled={!email || !password} className="h-12 w-full text-[15px]">
+        {busy ? 'Signing in…' : <>Sign in <ArrowRight aria-hidden className="h-4 w-4" /></>}
+      </Button>
     </form>
   );
 }
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm ring-1 ring-gray-200">
-        <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-600 text-xl text-white">☎</div>
-          <h1 className="text-xl font-semibold">AI Receptionist</h1>
-          <p className="mt-1 text-sm text-gray-500">Sign in to your shop dashboard</p>
+    <div className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
+      {/* Brand panel */}
+      <section aria-label="About the product" className="relative hidden overflow-hidden bg-gradient-to-br from-brand-700 via-brand-700 to-brand-900 p-12 text-white lg:flex lg:flex-col">
+        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(white_1px,transparent_1px),linear-gradient(90deg,white_1px,transparent_1px)] [background-size:44px_44px]" />
+        <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-brand-500/40 blur-3xl" />
+        <div className="relative"><Logo tone="light" subtitle={BRAND_TAGLINE} /></div>
+
+        <div className="relative mt-auto max-w-lg">
+          <h1 className="text-4xl font-bold leading-tight tracking-tight">Never miss a customer call again.</h1>
+          <p className="mt-4 text-lg text-brand-100">Your AI receptionist answers the phone, understands the car problem and books the appointment while your team keeps working.</p>
+
+          <ul className="mt-10 space-y-5">
+            {FEATURES.map(({ icon: Icon, title, text }) => (
+              <li key={title} className="flex gap-4">
+                <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20"><Icon className="h-5 w-5" /></span>
+                <div>
+                  <p className="font-semibold">{title}</p>
+                  <p className="text-sm text-brand-100">{text}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
-        <Suspense>
-          <LoginForm />
-        </Suspense>
-      </div>
-    </main>
+
+        {/* Example of what the AI produces (illustrative, not live data) */}
+        <figure aria-label="Example booking made by the AI receptionist" className="relative mt-12 max-w-sm rounded-2xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md">
+          <div className="flex items-center justify-between text-xs text-brand-100">
+            <span className="flex items-center gap-1.5"><Clock aria-hidden className="h-3.5 w-3.5" /> Booked by phone · 1 min ago</span>
+            <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 font-semibold text-emerald-100">Confirmed</span>
+          </div>
+          <p className="mt-3 font-semibold">Brake inspection · 2019 Honda Civic</p>
+          <p className="text-sm text-brand-100">Tuesday, 2:00 PM · Maria Lopez</p>
+        </figure>
+        <div className="relative mt-auto pt-10 text-xs text-brand-100/80">© {new Date().getFullYear()} · Built for independent auto repair shops</div>
+      </section>
+
+      {/* Sign-in */}
+      <main className="flex items-center justify-center bg-white px-6 py-12 sm:px-10">
+        <div className="w-full max-w-sm">
+          <div className="mb-10 lg:hidden"><Logo subtitle={BRAND_TAGLINE} /></div>
+          <h2 className="text-2xl font-bold tracking-tight text-ink">Welcome back</h2>
+          <p className="mt-2 text-sm text-ink-muted">Sign in to see your calls, bookings and shop settings.</p>
+          <div className="mt-8">
+            <Suspense><LoginForm /></Suspense>
+          </div>
+          <p className="mt-8 text-center text-xs text-ink-muted">Need access? Ask your shop owner to create a login for you.</p>
+        </div>
+      </main>
+    </div>
   );
 }
