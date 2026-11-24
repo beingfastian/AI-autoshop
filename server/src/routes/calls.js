@@ -1,7 +1,7 @@
 // Call routes for staff: read call history. Live calls go through routes/voice.js.
 const express = require('express');
 const router = express.Router();
-const { requireUuidParam, requireOwnRow } = require('../utils/ids');
+const { requireUuidParam, requireOwnRow, pageParams } = require('../utils/ids');
 const { scopedWorkshopId } = require('../middleware/session');
 
 const { query } = require('../config/database');
@@ -39,7 +39,14 @@ router.get('/:id', async (req, res) => {
         c.*,
         w.name as workshop_name,
         ca.structured_data,
-        ca.sentiment
+        ca.sentiment,
+        ca.customer_name,
+        ca.customer_phone,
+        ca.vehicle_make,
+        ca.vehicle_model,
+        ca.issue_keywords AS issue_summary,
+        ca.booking_created,
+        ca.callback_requested
       FROM calls c
       JOIN workshops w ON w.id = c.workshop_id
       LEFT JOIN call_analysis ca ON ca.call_id = c.id
@@ -68,15 +75,21 @@ router.get('/workshop/:workshopId', (req, res, next) => listCalls(req, res, next
 async function listCalls(req, res) {
   try {
     const { workshopId } = req.params;
-    const { limit = 50, offset = 0, status } = req.query;
+    const { status } = req.query;
+    const { limit, offset } = pageParams(req.query);
     
+    // No transcript here: lists stay small; GET /api/calls/:id has the full call
     let queryText = `
-      SELECT 
-        c.*,
+      SELECT
+        c.id, c.workshop_id, c.from_number, c.to_number, c.status, c.started_at, c.answered_at,
+        c.ended_at, c.duration_seconds, c.ended_reason, c.cost_usd,
         ca.customer_name,
+        ca.customer_phone,
         ca.vehicle_make,
         ca.vehicle_model,
-        ca.booking_created
+        ca.issue_keywords AS issue_summary,
+        ca.booking_created,
+        ca.callback_requested
       FROM calls c
       LEFT JOIN call_analysis ca ON ca.call_id = c.id
       WHERE c.workshop_id = $1
@@ -104,8 +117,8 @@ async function listCalls(req, res) {
     res.json({
       calls: result.rows,
       total: parseInt(countResult.rows[0].count),
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      limit,
+      offset
     });
     
   } catch (error) {

@@ -26,3 +26,16 @@ const requireOwnRow = (table, notFoundMessage) => async (req, res, next, id) => 
 };
 
 module.exports.requireOwnRow = requireOwnRow;
+
+// Page size and offset from query strings: whole numbers, limit 1-200 (default 50), offset >= 0.
+// Unchecked, "?limit=abc" is a 500 and "?limit=10000000" makes the DB do needless work.
+function pageParams({ limit, offset } = {}) {
+  const l = Number.parseInt(limit, 10);
+  const o = Number.parseInt(offset, 10);
+  return {
+    limit: Number.isFinite(l) ? Math.min(Math.max(l, 1), 200) : 50,
+    offset: Number.isFinite(o) ? Math.max(o, 0) : 0
+  };
+}
+
+module.exports.pageParams = pageParams;

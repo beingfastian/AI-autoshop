@@ -77,6 +77,17 @@ npm --prefix server run user:create -- --shop joe@joeauto.com --email owner@joea
 ```
 Without `NEW_USER_PASSWORD` set, a random password is generated and shown once. Passwords are hashed with scrypt; 5 wrong attempts lock the account for 15 minutes; sessions last 14 days and end on logout or password reset.
 
+## Shop dashboard (Next.js)
+
+`web/` is the shop dashboard: overview (next appointments, callers waiting for a call back), calls with transcripts, bookings (complete, no-show, cancel) and settings (opening hours, closed days, bays, appointment length, contacts). All times are shown in the shop's timezone.
+
+```bash
+npm --prefix server run dev      # API on :3001
+npm --prefix web run dev         # dashboard on http://localhost:3000
+```
+
+Sign in with a login made by `user:create` (above). The dashboard forwards `/api/*` to the API (`API_URL`, default `http://localhost:3001`), so the browser only talks to one site and the session cookie stays first-party.
+
 ## Voice agent (LiveKit)
 
 `agent/` answers the phone. For building and demos it uses free tiers: **LiveKit Cloud** (call handling, one free US number), **Deepgram** (speech to text and voice) and **Groq** (the LLM). All receptionist logic lives in the server; the agent calls `/api/voice` on every call, so the voice provider can be swapped later without touching it.
