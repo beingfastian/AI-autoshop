@@ -26,3 +26,8 @@ coverage/
 Thumbs.db
 .vscode/
 .idea/
+
+# Next.js build output
+.next/
+next-env.d.ts
+*.tsbuildinfo

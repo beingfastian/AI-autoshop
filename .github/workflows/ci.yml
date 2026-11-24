@@ -48,6 +48,7 @@ jobs:
             package-lock.json
             server/package-lock.json
             agent/package-lock.json
+            web/package-lock.json
 
       - name: Configure database via DB_* variables
         if: matrix.db-config == 'db-vars'
@@ -66,9 +67,17 @@ jobs:
           npm ci
           npm ci --prefix server
           npm ci --prefix agent
+          npm ci --prefix web
 
       - name: Lint
         run: npm run lint
 
       - name: Test
         run: npm test
+
+      - name: Dashboard type-check and build
+        run: |
+          npm --prefix web run typecheck
+          npm --prefix web run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1

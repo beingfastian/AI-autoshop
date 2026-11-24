@@ -5,7 +5,7 @@ const { query, getClient } = require('../config/database');
 const { createBooking, BookingError, SchedulingError, ISSUE_CATEGORIES, URGENCIES } = require('../services/bookings');
 const { getAvailableSlots, reserveSlot, ACTIVE_STATUSES } = require('../services/scheduling');
 const { resetReminders } = require('../services/notifications');
-const { requireUuidParam, requireOwnRow } = require('../utils/ids');
+const { requireUuidParam, requireOwnRow, pageParams } = require('../utils/ids');
 const { scopedWorkshopId } = require('../middleware/session');
 
 // Must match the bookings_status_check constraint (migration 0004)
@@ -25,10 +25,14 @@ router.get('/', async (req, res) => {
     const {
       status,
       date_from,
-      date_to,
-      limit = 50,
-      offset = 0
+      date_to
     } = req.query;
+    const { limit, offset } = pageParams(req.query);
+    for (const [name, value] of [['date_from', date_from], ['date_to', date_to]]) {
+      if (value !== undefined && Number.isNaN(Date.parse(value))) {
+        return res.status(400).json({ error: `${name} must be a date or date-time` });
+      }
+    }
     
     let queryText = `
       SELECT 
@@ -76,7 +80,9 @@ router.get('/', async (req, res) => {
       paramCount++;
     }
     
-    queryText += ` ORDER BY b.scheduled_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    // Newest first by default; sort=asc lists the soonest first (e.g. "next appointments")
+    const direction = req.query.sort === 'asc' ? 'ASC' : 'DESC';
+    queryText += ` ORDER BY b.scheduled_at ${direction} LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
     params.push(limit, offset);
     
     const result = await query(queryText, params);
@@ -97,14 +103,27 @@ router.get('/', async (req, res) => {
       countParams.push(status);
       countParamCount++;
     }
-    
+
+    // Same date range as the list, so page counts match what is shown
+    if (date_from) {
+      countQuery += ` AND scheduled_at >= $${countParamCount}`;
+      countParams.push(date_from);
+      countParamCount++;
+    }
+
+    if (date_to) {
+      countQuery += ` AND scheduled_at <= $${countParamCount}`;
+      countParams.push(date_to);
+      countParamCount++;
+    }
+
     const countResult = await query(countQuery, countParams);
     
     res.json({
       bookings: result.rows,
       total: parseInt(countResult.rows[0].count),
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      limit,
+      offset
     });
     
   } catch (error) {
