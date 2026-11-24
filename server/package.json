@@ -8,7 +8,8 @@
     "worker": "node src/worker.js",
     "dev": "nodemon src/server.js",
     "dev:worker": "nodemon src/worker.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "user:create": "node src/cli/createUser.js"
   },
   "dependencies": {
     "@sendgrid/mail": "^7.7.0",

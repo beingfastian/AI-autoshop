@@ -67,6 +67,16 @@ SMS is off unless `ENABLE_SMS=true` (see `server/.env.example`).
 
 Health check: `GET http://localhost:3001/health`.
 
+## Dashboard logins
+
+Shop staff sign in with email and password (`POST /api/auth/login`). A signed-in user only ever sees and changes **their own shop's** calls, bookings and settings; another shop's ids answer 404. Owners can change settings, staff can view them. The `API_KEY` header (`x-api-key`) is an **admin key** with access to every shop, for scripts only.
+
+Create a login, or reset a password:
+```bash
+npm --prefix server run user:create -- --shop joe@joeauto.com --email owner@joeauto.com --name "Joe Smith"
+```
+Without `NEW_USER_PASSWORD` set, a random password is generated and shown once. Passwords are hashed with scrypt; 5 wrong attempts lock the account for 15 minutes; sessions last 14 days and end on logout or password reset.
+
 ## Voice agent (LiveKit)
 
 `agent/` answers the phone. For building and demos it uses free tiers: **LiveKit Cloud** (call handling, one free US number), **Deepgram** (speech to text and voice) and **Groq** (the LLM). All receptionist logic lives in the server; the agent calls `/api/voice` on every call, so the voice provider can be swapped later without touching it.

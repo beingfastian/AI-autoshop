@@ -5,12 +5,14 @@ const { query, getClient } = require('../config/database');
 const { createBooking, BookingError, SchedulingError, ISSUE_CATEGORIES, URGENCIES } = require('../services/bookings');
 const { getAvailableSlots, reserveSlot, ACTIVE_STATUSES } = require('../services/scheduling');
 const { resetReminders } = require('../services/notifications');
-const { requireUuidParam } = require('../utils/ids');
+const { requireUuidParam, requireOwnRow } = require('../utils/ids');
+const { scopedWorkshopId } = require('../middleware/session');
 
 // Must match the bookings_status_check constraint (migration 0004)
 const BOOKING_STATUSES = ['pending', 'confirmed', 'completed', 'cancelled', 'no_show'];
 
 router.param('id', requireUuidParam('Booking not found'));
+router.param('id', requireOwnRow('bookings', 'Booking not found'));
 
 /**
  * GET /api/bookings
@@ -18,8 +20,9 @@ router.param('id', requireUuidParam('Booking not found'));
  */
 router.get('/', async (req, res) => {
   try {
-    const { 
-      workshop_id,
+    // Signed-in staff only ever see their own shop, whatever they ask for
+    const workshop_id = scopedWorkshopId(req) || req.query.workshop_id;
+    const {
       status,
       date_from,
       date_to,
@@ -166,7 +169,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   const body = req.body || {};
   const input = {
-    workshopId: body.workshop_id,
+    workshopId: scopedWorkshopId(req) || body.workshop_id, // staff book for their own shop only
     customer: { name: body.customer_name, phone: body.customer_phone, email: body.customer_email },
     vehicle: { make: body.vehicle_make, model: body.vehicle_model, year: body.vehicle_year },
     issue: { summary: body.issue_summary, category: body.issue_category, urgency: body.urgency },

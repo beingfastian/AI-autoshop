@@ -3,6 +3,7 @@
 const { testDbEnv } = require('../../scripts/db-config');
 
 process.env.NODE_ENV = 'test';
+process.env.LOGIN_RATE_LIMIT = '1000'; // every test signs in from one IP; auth.test.js checks the limiter itself
 Object.assign(process.env, testDbEnv()); // same DB the global setup prepared, even if configured via DATABASE_URL
 process.env.VOICE_AGENT_KEY = 'test-voice-agent-key-0123456789abcdef';
 process.env.API_KEY = 'test-api-key-0123456789abcdef0123456789';
