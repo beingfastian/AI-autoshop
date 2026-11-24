@@ -7,10 +7,13 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { pool } = require('./config/database');
-const { requireApiKey, requireVoiceAgentKey } = require('./middleware/apiKey');
+const { requireVoiceAgentKey } = require('./middleware/apiKey');
+const { requireStaff } = require('./middleware/session');
 const { overdueCount } = require('./services/notifications');
 const callRoutes = require('./routes/calls');
 const voiceRoutes = require('./routes/voice');
+const authRoutes = require('./routes/auth');
+const workshopRoutes = require('./routes/workshop');
 const bookingRoutes = require('./routes/bookings');
 
 const app = express();
@@ -57,10 +60,13 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Routes. The voice agent has its own key, separate from the staff API key.
-app.use('/api/calls', requireApiKey, callRoutes);
+// Routes. Staff routes take a signed-in user (own shop only) or the admin API_KEY (all shops).
+// The voice agent has its own key.
+app.use('/api/auth', authRoutes);
+app.use('/api/calls', requireStaff, callRoutes);
+app.use('/api/bookings', requireStaff, bookingRoutes);
+app.use('/api/workshop', requireStaff, workshopRoutes);
 app.use('/api/voice', requireVoiceAgentKey, voiceRoutes);
-app.use('/api/bookings', requireApiKey, bookingRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Not Found', path: req.path }));

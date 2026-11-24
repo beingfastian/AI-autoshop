@@ -65,7 +65,7 @@ describe('API key on /api routes', () => {
     async (url) => {
       const res = await request(app).get(url);
       expect(res.status).toBe(401);
-      expect(res.body).toEqual({ error: 'Unauthorized' });
+      expect(res.body).toEqual({ error: 'Please sign in' }); // staff routes need a session or the admin key
     }
   );
 

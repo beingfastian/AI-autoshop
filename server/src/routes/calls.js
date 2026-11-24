@@ -1,12 +1,30 @@
 // Call routes for staff: read call history. Live calls go through routes/voice.js.
 const express = require('express');
 const router = express.Router();
-const { requireUuidParam } = require('../utils/ids');
+const { requireUuidParam, requireOwnRow } = require('../utils/ids');
+const { scopedWorkshopId } = require('../middleware/session');
 
 const { query } = require('../config/database');
 
 router.param('id', requireUuidParam('Call not found'));
+router.param('id', requireOwnRow('calls', 'Call not found'));
 router.param('workshopId', requireUuidParam('Workshop not found'));
+// Staff can only list their own shop's calls
+router.param('workshopId', (req, res, next, id) => {
+  const own = scopedWorkshopId(req);
+  return own && own !== id ? res.status(404).json({ error: 'Workshop not found' }) : next();
+});
+
+/**
+ * GET /api/calls
+ * The signed-in user's own shop's calls (same filters as /workshop/:workshopId)
+ */
+router.get('/', (req, res, next) => {
+  const own = scopedWorkshopId(req);
+  if (!own) return res.status(400).json({ error: 'Use /api/calls/workshop/:workshopId with the admin key' });
+  req.params.workshopId = own;
+  return listCalls(req, res, next);
+});
 
 /**
  * GET /api/calls/:id
@@ -45,7 +63,9 @@ router.get('/:id', async (req, res) => {
  * GET /api/calls/workshop/:workshopId
  * Get all calls for a workshop
  */
-router.get('/workshop/:workshopId', async (req, res) => {
+router.get('/workshop/:workshopId', (req, res, next) => listCalls(req, res, next));
+
+async function listCalls(req, res) {
   try {
     const { workshopId } = req.params;
     const { limit = 50, offset = 0, status } = req.query;
@@ -92,6 +112,6 @@ router.get('/workshop/:workshopId', async (req, res) => {
     console.error('Error fetching calls:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+}
 
 module.exports = router;
