@@ -90,6 +90,19 @@ npm --prefix web run dev         # dashboard on http://localhost:3000
 
 Sign in with a login made by `user:create` (above). The dashboard forwards `/api/*` to the API (`API_URL`, default `http://localhost:3001`), so the browser only talks to one site and the session cookie stays first-party.
 
+## Deploying (Vercel + Neon)
+
+Two Vercel projects: `server/` (API, Express preset) and `web/` (dashboard, Next.js preset). Each folder's `vercel.json` sets the preset, because projects made with `vercel project add` start as plain static sites.
+
+1. **Database:** add Neon from the API project's Storage tab. It sets `DATABASE_URL` on the project. These values are marked sensitive, so `vercel env pull` returns them blank: copy the **unpooled** URL from the Neon panel into a git-ignored file (e.g. `server/.env.neon.local`) to run migrations from your machine:
+   ```bash
+   DATABASE_URL=postgresql://... npm run db:migrate
+   ```
+2. **API settings:** `NODE_ENV=production`, `API_KEY`, `VOICE_AGENT_KEY`, `CRON_SECRET` (each `openssl rand -hex 32`), `TRUST_PROXY=true`, `DB_POOL_MAX=5`, and SendGrid keys or `EMAIL_DELIVERY=off`.
+3. **Dashboard settings:** `API_URL=https://<api-project>.vercel.app`. Rewrites are fixed at build time, so redeploy the dashboard after changing it.
+4. **Background jobs:** Vercel Hobby crons run once a day. For on-time reminders, call `POST /api/jobs/tick` every minute from an external scheduler with `Authorization: Bearer $CRON_SECRET`.
+5. **Demo data (optional):** `DATABASE_URL=... DEMO_PASSWORD=... npm --prefix server run demo:seed -- --yes` loads the sample shop and a staff login, `demo@wrenchline.app`. Re-run it to refresh the dates or undo visitors' changes.
+
 ## Voice agent (LiveKit)
 
 `agent/` answers the phone. For building and demos it uses free tiers: **LiveKit Cloud** (call handling, one free US number), **Deepgram** (speech to text and voice) and **Groq** (the LLM). All receptionist logic lives in the server; the agent calls `/api/voice` on every call, so the voice provider can be swapped later without touching it.

@@ -31,3 +31,6 @@ Thumbs.db
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# Vercel project links (local)
+.vercel/
