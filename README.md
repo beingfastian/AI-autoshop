@@ -81,7 +81,7 @@ Without `NEW_USER_PASSWORD` set, a random password is generated and shown once. 
 
 ## Shop dashboard (Next.js)
 
-`web/` is the shop dashboard: overview (next appointments, callers waiting for a call back), calls with transcripts, bookings (complete, no-show, cancel) and settings (opening hours, closed days, bays, appointment length, contacts). All times are shown in the shop's timezone.
+`web/` holds the public landing page (`/`) and the shop dashboard (`/dashboard`, signed-in only): overview (next appointments, callers waiting for a call back), calls with transcripts, bookings (complete, no-show, cancel) and settings (opening hours, closed days, bays, appointment length, contacts). All times are shown in the shop's timezone.
 
 ```bash
 npm --prefix server run dev      # API on :3001
@@ -99,7 +99,7 @@ Two Vercel projects: `server/` (API, Express preset) and `web/` (dashboard, Next
    DATABASE_URL=postgresql://... npm run db:migrate
    ```
 2. **API settings:** `NODE_ENV=production`, `API_KEY`, `VOICE_AGENT_KEY`, `CRON_SECRET` (each `openssl rand -hex 32`), `TRUST_PROXY=true`, `DB_POOL_MAX=5`, and SendGrid keys or `EMAIL_DELIVERY=off`.
-3. **Dashboard settings:** `API_URL=https://<api-project>.vercel.app`. Rewrites are fixed at build time, so redeploy the dashboard after changing it.
+3. **Dashboard settings:** `API_URL=https://<api-project>.vercel.app`. Rewrites are fixed at build time, so redeploy the dashboard after changing it. To give the landing page a one-click demo, also set `NEXT_PUBLIC_DEMO_EMAIL` and `NEXT_PUBLIC_DEMO_PASSWORD`. These go into the public bundle, so use only the staff demo login. `/login?demo` fills them in.
 4. **Background jobs:** Vercel Hobby crons run once a day. For on-time reminders, call `POST /api/jobs/tick` every minute from an external scheduler with `Authorization: Bearer $CRON_SECRET`.
 5. **Demo data (optional):** `DATABASE_URL=... DEMO_PASSWORD=... npm --prefix server run demo:seed -- --yes` loads the sample shop and a staff login, `demo@wrenchline.app`. Re-run it to refresh the dates or undo visitors' changes.
 

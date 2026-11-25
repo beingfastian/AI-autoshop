@@ -66,7 +66,7 @@ export default function CallDetailPage({ params }: { params: Promise<{ id: strin
   const { data: call, error, loading, reload } = useLoad(() => api<CallDetail>(`/calls/${id}`), [id]);
 
   const back = (
-    <Link href="/calls" className="mb-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-muted transition-colors hover:text-ink">
+    <Link href="/dashboard/calls" className="mb-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-muted transition-colors hover:text-ink">
       <ArrowLeft aria-hidden className="h-4 w-4" /> All calls
     </Link>
   );

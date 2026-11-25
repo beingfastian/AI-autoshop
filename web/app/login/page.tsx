@@ -6,7 +6,8 @@ import { ArrowRight, CalendarCheck, CircleAlert, Clock, Mail, PhoneIncoming } fr
 import { Logo } from '@/components/Logo';
 import { Button } from '@/components/ui';
 import { api, ApiError, type User } from '@/lib/api';
-import { BRAND_TAGLINE } from '@/lib/brand';
+import { BRAND_TAGLINE, DEMO_LOGIN } from '@/lib/brand';
+import Link from 'next/link';
 
 const FEATURES = [
   { icon: PhoneIncoming, title: 'Answers every call', text: 'Day, night and weekends. No more missed customers or voicemail.' },
@@ -20,14 +21,16 @@ const field =
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // /login?demo fills in the public demo login (only when one is configured)
+  const demo = params.has('demo') && DEMO_LOGIN ? DEMO_LOGIN : null;
+  const [email, setEmail] = useState(demo?.email ?? '');
+  const [password, setPassword] = useState(demo?.password ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Only return to paths on this site (never an outside URL passed in ?next=)
   const next = params.get('next');
-  const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
+  const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -44,6 +47,11 @@ function LoginForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
+      {demo && (
+        <p className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
+          The demo login is filled in. Press <strong>Sign in</strong> to look around a sample shop.
+        </p>
+      )}
       <div>
         <label htmlFor="email" className="text-sm font-semibold text-ink">Work email</label>
         <input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@yourshop.com" className={field} />
@@ -72,7 +80,7 @@ export default function LoginPage() {
       <section aria-label="About the product" className="relative hidden overflow-hidden bg-gradient-to-br from-brand-700 via-brand-700 to-brand-900 p-12 text-white lg:flex lg:flex-col">
         <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(white_1px,transparent_1px),linear-gradient(90deg,white_1px,transparent_1px)] [background-size:44px_44px]" />
         <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-brand-500/40 blur-3xl" />
-        <div className="relative"><Logo tone="light" subtitle={BRAND_TAGLINE} /></div>
+        <div className="relative"><Link href="/" aria-label="Back to the home page" className="inline-block rounded-xl"><Logo tone="light" subtitle={BRAND_TAGLINE} /></Link></div>
 
         <div className="relative mt-auto max-w-lg">
           <h1 className="text-4xl font-bold leading-tight tracking-tight">Never miss a customer call again.</h1>
@@ -106,7 +114,7 @@ export default function LoginPage() {
       {/* Sign-in */}
       <main className="flex items-center justify-center bg-white px-6 py-12 sm:px-10">
         <div className="w-full max-w-sm">
-          <div className="mb-10 lg:hidden"><Logo subtitle={BRAND_TAGLINE} /></div>
+          <div className="mb-10 lg:hidden"><Link href="/" aria-label="Back to the home page" className="inline-block rounded-xl"><Logo subtitle={BRAND_TAGLINE} /></Link></div>
           <h2 className="text-2xl font-bold tracking-tight text-ink">Welcome back</h2>
           <p className="mt-2 text-sm text-ink-muted">Sign in to see your calls, bookings and shop settings.</p>
           <div className="mt-8">

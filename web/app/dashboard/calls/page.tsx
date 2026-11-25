@@ -45,7 +45,7 @@ function CallsList() {
       if (v === null) next.delete(k);
       else next.set(k, v);
     }
-    router.push(`/calls${next.size ? `?${next}` : ''}`);
+    router.push(`/dashboard/calls${next.size ? `?${next}` : ''}`);
   };
 
   const calls = (data?.calls || []).filter((c) => filter === 'all' || (c.callback_requested && !c.booking_created));
@@ -86,7 +86,7 @@ function CallsList() {
                       <div className="flex items-center gap-3">
                         <Avatar name={c.customer_name} size="sm" />
                         <div className="min-w-0">
-                          <Link href={`/calls/${c.id}`} className="block truncate font-semibold text-ink after:absolute after:inset-0 group-hover:text-brand-700">
+                          <Link href={`/dashboard/calls/${c.id}`} className="block truncate font-semibold text-ink after:absolute after:inset-0 group-hover:text-brand-700">
                             {c.customer_name || 'Unknown caller'}
                           </Link>
                           <p className="text-ink-muted">{formatPhone(c.customer_phone || c.from_number)}</p>

@@ -105,7 +105,7 @@ export default function OverviewPage() {
             icon={PhoneOutgoing}
             title="Waiting for a call back"
             description="They wanted an appointment but weren't booked"
-            action={callbacks.length > 0 ? <TextLink href="/calls?filter=callback">View all</TextLink> : undefined}
+            action={callbacks.length > 0 ? <TextLink href="/dashboard/calls?filter=callback">View all</TextLink> : undefined}
           />
           {callbacks.length === 0 ? (
             <Empty icon={PhoneOutgoing} title="Nobody is waiting" hint="When the AI can't book a caller, they show up here so you can call them back." />
@@ -117,7 +117,7 @@ export default function OverviewPage() {
                   <li key={c.id} className="flex items-center gap-4 px-5 py-4 sm:px-6">
                     <Avatar name={c.customer_name} />
                     <div className="min-w-0 flex-1">
-                      <Link href={`/calls/${c.id}`} className="block truncate font-semibold text-ink hover:text-brand-700">{c.customer_name || 'Unknown caller'}</Link>
+                      <Link href={`/dashboard/calls/${c.id}`} className="block truncate font-semibold text-ink hover:text-brand-700">{c.customer_name || 'Unknown caller'}</Link>
                       <p className="truncate text-sm text-ink-muted">{c.issue_summary || 'No details captured'}</p>
                     </div>
                     <a
@@ -135,7 +135,7 @@ export default function OverviewPage() {
         </Card>
 
         <Card>
-          <CardHeader icon={CalendarCheck} title="Next appointments" action={data.next.length > 0 ? <TextLink href="/bookings">View all</TextLink> : undefined} />
+          <CardHeader icon={CalendarCheck} title="Next appointments" action={data.next.length > 0 ? <TextLink href="/dashboard/bookings">View all</TextLink> : undefined} />
           {data.next.length === 0 ? (
             <Empty icon={CalendarDays} title="No upcoming appointments" hint="Bookings made by the AI or your team appear here." />
           ) : (
@@ -159,7 +159,7 @@ export default function OverviewPage() {
             </ul>
           )}
           {data.next.length > 5 && (
-            <Link href="/bookings" className="flex items-center justify-center gap-1.5 border-t border-line py-3 text-sm font-semibold text-brand-600 hover:bg-slate-50">
+            <Link href="/dashboard/bookings" className="flex items-center justify-center gap-1.5 border-t border-line py-3 text-sm font-semibold text-brand-600 hover:bg-slate-50">
               {data.next.length - 5} more <ArrowRight aria-hidden className="h-4 w-4" />
             </Link>
           )}
