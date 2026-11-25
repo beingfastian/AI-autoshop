@@ -54,7 +54,7 @@ function BookingsList() {
       if (v === null || v === '') next.delete(k);
       else next.set(k, v);
     }
-    router.push(`/bookings${next.size ? `?${next}` : ''}`);
+    router.push(`/dashboard/bookings${next.size ? `?${next}` : ''}`);
   };
 
   const dialog: ConfirmOptions | null = pending && {
@@ -163,7 +163,7 @@ function BookingsList() {
                         </p>
                         <p className="mt-0.5 truncate text-ink-muted">{b.issue_summary}</p>
                         {b.call_id && (
-                          <Link href={`/calls/${b.call_id}`} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700">
+                          <Link href={`/dashboard/calls/${b.call_id}`} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700">
                             <PhoneIncoming aria-hidden className="h-3 w-3" /> Booked by phone
                           </Link>
                         )}

@@ -19,10 +19,10 @@ export function useMe(): Me {
 }
 
 const NAV: { href: string; label: string; icon: LucideIcon }[] = [
-  { href: '/', label: 'Overview', icon: LayoutDashboard },
-  { href: '/calls', label: 'Calls', icon: PhoneCall },
-  { href: '/bookings', label: 'Bookings', icon: CalendarDays },
-  { href: '/settings', label: 'Settings', icon: Settings }
+  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/dashboard/calls', label: 'Calls', icon: PhoneCall },
+  { href: '/dashboard/bookings', label: 'Bookings', icon: CalendarDays },
+  { href: '/dashboard/settings', label: 'Settings', icon: Settings }
 ];
 
 function NavLinks({ active, compact = false }: { active: (href: string) => boolean; compact?: boolean }) {
@@ -74,7 +74,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const active = (href: string) => (href === '/' ? pathname === '/' : pathname.startsWith(href));
+  const active = (href: string) => (href === '/dashboard' ? pathname === href : pathname.startsWith(href));
 
   return (
     <MeContext.Provider value={me}>
@@ -84,7 +84,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         {/* The aside stretches to the full page height; its contents stay pinned while scrolling */}
         <aside className="hidden w-64 shrink-0 border-r border-line bg-white lg:block">
           <div className="sticky top-0 flex h-screen flex-col">
-          <div className="px-5 py-5"><Logo subtitle={me.workshop.name} /></div>
+          <div className="px-5 py-5"><Link href="/dashboard" aria-label="Overview" className="block rounded-xl"><Logo subtitle={me.workshop.name} /></Link></div>
           <nav aria-label="Main" className="flex flex-1 flex-col gap-1 px-3"><NavLinks active={active} /></nav>
           <div className="border-t border-line p-4">
             <div className="flex items-center gap-3">
